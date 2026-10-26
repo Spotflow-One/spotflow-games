@@ -183,13 +183,19 @@ export class SessionManager {
     throw new Error("Could not allocate a session code");
   }
 
-  async join(code: string, user: { id: string; displayName: string; avatar: unknown }, socketId: string) {
+  async join(
+    code: string,
+    user: { id: string; displayName: string; avatar: unknown },
+    socketId: string,
+    alias?: string | null,
+  ) {
     const { room, isNew } = await this.run(code, (room) => {
       const isNew = !room.participants.has(user.id);
       room.join(
         { id: user.id, displayName: user.displayName, avatar: parseAvatar(user.avatar) },
         socketId,
         this.maxPlayers,
+        alias,
       );
       return { room: { id: room.id, view: room.viewFor(user.id) }, isNew };
     });

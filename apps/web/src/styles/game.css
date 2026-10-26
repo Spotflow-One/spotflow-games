@@ -702,3 +702,9 @@ a.sg-btn {
     display: none;
   }
 }
+
+/* "How you'll appear" card in the lobby */
+.you-card {
+  border-radius: var(--radius-xl);
+  border-left: 6px solid var(--g);
+}

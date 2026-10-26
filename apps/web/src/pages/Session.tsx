@@ -27,6 +27,7 @@ import { usePreferences } from "../lib/preferences";
 import { getSocket, request } from "../lib/socket";
 import { playSound } from "../lib/sound";
 import { Avatar } from "../components/Avatar";
+import { HowYouAppear } from "../components/HowYouAppear";
 import { GameIcon } from "../components/GameIcon";
 import { Confetti } from "../components/Confetti";
 import { rankedPlayers } from "../components/Standings";
@@ -242,6 +243,15 @@ export function Session() {
       )}
 
       {finished && <Results view={view} meId={me.id} />}
+
+      {inLobby && (
+        <HowYouAppear
+          code={code}
+          you={view.participants.find((p) => p.userId === me.id)}
+          onJoined={setView}
+          onError={setNotice}
+        />
+      )}
 
       {!finished &&
         view.status !== "cancelled" &&

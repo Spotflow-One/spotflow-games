@@ -1,7 +1,12 @@
 import type { Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import { ZodError } from "zod";
-import { sessionCodeSchema, type ClientToServerEvents, type ServerToClientEvents } from "@spotflow-games/shared";
+import {
+  aliasSchema,
+  sessionCodeSchema,
+  type ClientToServerEvents,
+  type ServerToClientEvents,
+} from "@spotflow-games/shared";
 import type { Db } from "../db/client.js";
 import { SESSION_COOKIE, findSessionUser, type SessionUser } from "../auth/sessions.js";
 import { getUser } from "../auth/users.js";
@@ -101,11 +106,12 @@ export function createGateway(server: HttpServer, opts: GatewayOptions) {
       "session:join",
       handle(
         "join",
-        async (code) => {
+        async (code, payload: { code: string; alias?: unknown }) => {
+          const alias = payload.alias === undefined ? undefined : aliasSchema.parse(payload.alias);
           // Re-read the profile so a just-updated name or avatar shows up in the lobby.
           const fresh = (await getUser(db, user.id)) ?? user;
           if (fresh.deactivatedAt) throw new GameError("This account is deactivated");
-          const view = await manager.join(code, fresh, socket.id);
+          const view = await manager.join(code, fresh, socket.id, alias);
           joined.add(code);
           return view;
         },
