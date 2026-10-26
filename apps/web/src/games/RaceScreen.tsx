@@ -11,8 +11,6 @@ import {
   Zap,
 } from "lucide-react";
 import {
-  OBSTACLE_KINDS,
-  RACE_BOXES,
   RACE_FLAG,
   RACE_ITEM,
   RACE_RULES as R,
@@ -20,13 +18,10 @@ import {
   buildCourse,
   clampToWalls,
   locate,
-  mulberry32,
-  moversAt,
   newCar,
   stepCar,
   trackPoint,
   type CarState,
-  type ObstacleKind,
   type RaceCourse,
   type RacePlayerTuple,
   type RaceSnapshot,
@@ -36,6 +31,8 @@ import {
 import { usePreferences } from "../lib/preferences";
 import { getSocket } from "../lib/socket";
 import { playSound } from "../lib/sound";
+import type { RaceWorld } from "./race3d";
+import { carPaint } from "./racePaint";
 
 interface Props {
   session: SessionView;
@@ -67,23 +64,8 @@ const HEARTBEAT_MS = 400;
  */
 const SNAP_DIST = 160;
 const SNAP_AFTER_MS = 1500;
-/** Displayed speed: units per second to km/h. */
-const KMH = 0.3;
-
-/** Car paint. Past ten racers, cars get one and then two racing stripes. */
-const PAINT = [
-  "#ff5a4e",
-  "#2f9bff",
-  "#3fd08b",
-  "#ffc53d",
-  "#c86bff",
-  "#ff7ac8",
-  "#2fe0d4",
-  "#ff9a3d",
-  "#a8ff4a",
-  "#f4f4ff",
-];
-export const carPaint = (n: number) => PAINT[n % PAINT.length]!;
+/** Displayed speed: units per second to km/h, scaled up to Grand Prix speeds. */
+const KMH = 0.5;
 
 interface Particle {
   x: number;
@@ -108,6 +90,11 @@ interface Hud {
   of: number;
   lap: number;
   speed: number;
+  gear: string;
+  lapTime: string;
+  best: string;
+  /** Start lights showing, out of five. */
+  lights: number;
   item: number;
   district: string;
   clock: string;
@@ -118,6 +105,12 @@ interface Hud {
 }
 
 const firstName = (name?: string) => name?.split(" ")[0] ?? "Racer";
+/** Three letters, as on a timing screen. */
+const tla = (name: string) =>
+  name
+    .replace(/[^\p{L}\p{N}]/gu, "")
+    .slice(0, 3)
+    .toUpperCase() || "???";
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const lerpAngle = (a: number, b: number, t: number) => {
   let d = b - a;
@@ -142,9 +135,15 @@ const districtAt = (s: number) => {
   return name;
 };
 
+/** Starts downloading the 3D renderer; the race picks up the same module. */
+export const preloadRace3d = () => import("./race3d").catch(() => undefined);
+
 export function RaceScreen({ session, game, meId }: Props) {
   const { soundEnabled } = usePreferences();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const glRef = useRef<HTMLCanvasElement>(null);
+  const worldRef = useRef<RaceWorld | null>(null);
+  const [noGl, setNoGl] = useState(false);
   const touch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   const [full, setFull] = useState(touch);
   const [mapView, setMapView] = useState(false);
@@ -153,6 +152,10 @@ export function RaceScreen({ session, game, meId }: Props) {
     of: game.racers.length,
     lap: 1,
     speed: 0,
+    gear: "N",
+    lapTime: "0:00.0",
+    best: "",
+    lights: 0,
     item: 0,
     district: T.districts[0]!.name,
     clock: "0:00.0",
@@ -185,7 +188,17 @@ export function RaceScreen({ session, game, meId }: Props) {
   const arrivals = useRef<number[]>([]);
   const trail = useRef<{ t: number; x: number; y: number }[]>([]);
   const car = useRef<CarState | null>(null);
-  const meInfo = useRef({ k: -1, item: 0, finished: false, progress: -1, lapShown: 1, driftSince: 0 });
+  const meInfo = useRef({
+    k: -1,
+    item: 0,
+    finished: false,
+    progress: -1,
+    lapShown: 1,
+    driftSince: 0,
+    lapStart: 0,
+    lastLap: 0,
+    best: 0,
+  });
   const particles = useRef<Particle[]>([]);
   const controls = useRef({
     keys: new Set<string>(),
@@ -335,6 +348,24 @@ export function RaceScreen({ session, game, meId }: Props) {
     };
   }, []);
 
+  // The 3D renderer is loaded on demand, so the other games don't download it.
+  useEffect(() => {
+    let alive = true;
+    let made: RaceWorld | null = null;
+    import("./race3d")
+      .then((m) => {
+        if (!alive || !glRef.current) return;
+        made = m.createRaceWorld(glRef.current);
+        worldRef.current = made;
+      })
+      .catch(() => alive && setNoGl(true));
+    return () => {
+      alive = false;
+      worldRef.current = null;
+      made?.dispose();
+    };
+  }, []);
+
   // The render, physics and input loop.
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -345,7 +376,7 @@ export function RaceScreen({ session, game, meId }: Props) {
     let last = performance.now();
     let lastHud = 0;
     let view = { w: 0, h: 0, dpr: 1 };
-    const cam = { x: 0, y: 0, a: 0, zoom: 1, ready: false };
+    let sizedWorld: RaceWorld | null = null;
     let shakeUntil = 0;
     let wrongSince = 0;
     let lastCount: number | null = null;
@@ -357,6 +388,7 @@ export function RaceScreen({ session, game, meId }: Props) {
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
       view = { w: rect.width, h: rect.height, dpr };
+      sizedWorld = null;
     };
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
@@ -448,117 +480,84 @@ export function RaceScreen({ session, game, meId }: Props) {
         focus = world.find((w) => w.n === followN.current) ?? null;
       }
       const overview = mapRef.current || !focus;
-      const rotate = !still && !overview;
-      if (focus) {
-        if (!cam.ready) {
-          Object.assign(cam, { x: focus.x, y: focus.y, a: focus.h, ready: true });
+
+      // The 3D world.
+      const w3 = worldRef.current;
+      if (w3) {
+        if (sizedWorld !== w3) {
+          w3.resize(view.w, view.h, Math.min(touch ? 1.5 : 2, view.dpr));
+          sizedWorld = w3;
         }
-        const follow = 1 - Math.exp(-dt * 10);
-        cam.x = lerp(cam.x, focus.x, follow);
-        cam.y = lerp(cam.y, focus.y, follow);
-        cam.a = lerpAngle(cam.a, focus.h, 1 - Math.exp(-dt * 4));
-        cam.zoom = lerp(cam.zoom, 1 + Math.min(1, Math.abs(focus.v) / R.nitroSpeed) * 0.4, 1 - Math.exp(-dt * 2));
+        w3.setCourse(crs);
+        const cars = world
+          .filter((w) => !(w.n === myN && playing))
+          .map((w) => ({ n: w.n, x: w.x, y: w.y, h: w.h, v: w.v, boost: !!(w.flags & RACE_FLAG.boost) }));
+        if (playing && c) cars.push({ n: myN, x: c.x, y: c.y, h: c.h, v: c.v, boost: now < c.boostUntil });
+        w3.render({
+          t,
+          raceT,
+          countdown: now < g.goAt ? g.goAt - now : null,
+          focus,
+          overview,
+          still,
+          shake: t < shakeUntil,
+          cars,
+          taken,
+          slicks,
+        });
       }
 
-      // Draw.
+      // Sparks, names and the map, drawn flat over the 3D view.
       ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
-      ctx.fillStyle = COLORS.ground;
-      ctx.fillRect(0, 0, view.w, view.h);
-      ctx.save();
-      let scale: number;
-      let theta: number;
-      let cx: number;
-      let cy: number;
-      let ox = cam.x;
-      let oy = cam.y;
-      if (overview) {
-        const b = T.bounds;
-        const pad = 400;
-        scale = Math.min(view.w / (b.maxX - b.minX + pad * 2), view.h / (b.maxY - b.minY + pad * 2));
-        theta = 0;
-        cx = view.w / 2;
-        cy = view.h / 2;
-        ox = (b.minX + b.maxX) / 2;
-        oy = (b.minY + b.maxY) / 2;
-      } else {
-        // About 500 units of road ahead on any screen, a bit more at speed.
-        scale = Math.max(view.h, view.w * 0.6) / (720 * cam.zoom);
-        theta = rotate ? -Math.PI / 2 - cam.a : 0;
-        cx = view.w / 2;
-        cy = rotate ? view.h * 0.66 : view.h / 2;
-      }
-      if (t < shakeUntil && !still) {
-        cx += (Math.random() - 0.5) * 8;
-        cy += (Math.random() - 0.5) * 8;
-      }
-      ctx.translate(cx, cy);
-      ctx.rotate(theta);
-      ctx.scale(scale, scale);
-      ctx.translate(-ox, -oy);
-      const radius = Math.hypot(view.w, view.h) / scale;
-      const near = (x: number, y: number, pad = 200) =>
-        Math.abs(x - ox) < radius + pad && Math.abs(y - oy) < radius + pad;
-
-      drawScenery(ctx, scene, t, still, near, overview);
-      for (const b of RACE_BOXES) if (!taken.has(b.id) && near(b.x, b.y)) drawBox(ctx, b.x, b.y, t, still);
-      for (const s of slicks) if (near(s.x, s.y)) drawSlick(ctx, s.x, s.y, s.id);
-      if (!overview) {
-        for (const o of crs.statics) {
-          const p = trackPoint(o.s, o.d);
-          if (near(p.x, p.y)) drawObstacle(ctx, o.kind, p.x, p.y, p.h, o.v, false, t);
-        }
-        for (const mv of moversAt(crs, raceT)) {
-          const p = trackPoint(mv.s, mv.d);
-          if (near(p.x, p.y)) drawObstacle(ctx, mv.m.kind, p.x, p.y, p.h, mv.m.v2, mv.signal, t, mv.m.amp);
-        }
-      }
-      for (const w of world) {
-        if (w.n === myN && playing) continue;
-        if (near(w.x, w.y)) drawCar(ctx, w.x, w.y, w.h, w.n, !!(w.flags & RACE_FLAG.boost), overview ? 2.6 : 1, t);
-      }
-      if (playing && c)
-        drawCar(ctx, c.x, c.y, c.h, myN, now < c.boostUntil, overview ? 3 : 1, t, true, now < c.spinUntil);
-
-      // Particles.
+      ctx.clearRect(0, 0, view.w, view.h);
       const ps = particles.current;
+      const pnow = performance.now();
       for (let i = ps.length - 1; i >= 0; i--) {
         const p = ps[i]!;
-        if (performance.now() > p.until) {
+        if (pnow > p.until) {
           ps.splice(i, 1);
           continue;
         }
         p.x += p.vx * dt;
         p.y += p.vy * dt;
+        const sp = w3?.project(p.x, p.y, 5);
+        if (!sp) continue;
+        const size = Math.max(1.5, p.size * sp.scale);
         ctx.fillStyle = p.color;
-        ctx.globalAlpha = Math.max(0, (p.until - performance.now()) / 400);
-        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+        ctx.globalAlpha = Math.max(0, (p.until - pnow) / 400);
+        ctx.fillRect(sp.x - size / 2, sp.y - size / 2, size, size);
       }
       ctx.globalAlpha = 1;
-      drawGantry(ctx);
-      ctx.restore();
 
-      // Names, upright on screen.
-      const toScreen = (x: number, y: number) => {
-        const dx = (x - ox) * scale;
-        const dy = (y - oy) * scale;
-        return {
-          x: cx + dx * Math.cos(theta) - dy * Math.sin(theta),
-          y: cy + dx * Math.sin(theta) + dy * Math.cos(theta),
-        };
-      };
-      ctx.font = `700 13px ${COLORS.body}`;
-      ctx.textAlign = "center";
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = COLORS.ink;
-      for (const w of world) {
-        if (w.n === myN && playing) continue;
-        if (!near(w.x, w.y, 0)) continue;
-        const p = toScreen(w.x, w.y);
-        if (overview && world.length > 12) continue;
-        const name = names.current.get(w.n) ?? "";
-        ctx.strokeText(name, p.x, p.y - 22);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillText(name, p.x, p.y - 22);
+      if (w3) {
+        ctx.font = `800 12px ${FONT}`;
+        ctx.textAlign = "center";
+        ctx.lineJoin = "round";
+        for (const w of world) {
+          const mine = w.n === myN && playing;
+          if (mine && !overview) continue;
+          const sp = w3.project(w.x, w.y, overview ? 0 : 26, w.n);
+          if (!sp) continue;
+          if (overview) {
+            ctx.fillStyle = carPaint(w.n);
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, mine ? 7 : 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            if (world.length > 12 && !mine) continue;
+          } else if (sp.scale < 0.12) continue;
+          const name = mine ? "YOU" : tla(names.current.get(w.n) ?? "");
+          const label = overview ? sp.y - 12 : sp.y;
+          const tw = ctx.measureText(name).width + 12;
+          ctx.fillStyle = "rgba(21, 21, 30, 0.85)";
+          ctx.fillRect(sp.x - tw / 2, label - 15, tw, 18);
+          ctx.fillStyle = carPaint(w.n);
+          ctx.fillRect(sp.x - tw / 2, label - 15, 3, 18);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(name, sp.x + 1, label - 2);
+        }
       }
 
       if (!overview) drawMinimap(ctx, scene, view.w, view.h, world, playing && c ? c : null, myN);
@@ -570,6 +569,14 @@ export function RaceScreen({ session, game, meId }: Props) {
         const pos = playing ? order.findIndex((o) => o.n === myN) + 1 : 0;
         const lap = Math.max(1, Math.min(g.laps, Math.floor(Math.max(0, myProgress) / T.length) + 1));
         const m = meInfo.current;
+        if (!m.lapStart) m.lapStart = g.goAt;
+        const lapDone = playing && ((lap > m.lapShown && !m.finished) || (m.finished && !m.lastLap));
+        if (lapDone) {
+          // Lap times from the server's lap count, so they line up with the timing tower.
+          m.lastLap = now - m.lapStart;
+          m.best = m.best ? Math.min(m.best, m.lastLap) : m.lastLap;
+          m.lapStart = now;
+        }
         if (playing && lap > m.lapShown && !m.finished) {
           m.lapShown = lap;
           setBanner(lap === g.laps ? "Final lap!" : `Lap ${lap} of ${g.laps}`);
@@ -578,6 +585,7 @@ export function RaceScreen({ session, game, meId }: Props) {
         }
         const countMs = g.goAt - now;
         const count = countMs > 0 ? Math.ceil(countMs / 1000) : countMs > -900 ? 0 : null;
+        const lights = countMs > 0 ? Math.min(5, Math.ceil(((R.countdownMs - countMs) / R.countdownMs) * 6)) : 0;
         if (count !== lastCount && count !== null) playSound(count === 0 ? "correct" : "countdown", soundRef.current);
         lastCount = count;
         let wrongWay = false;
@@ -593,6 +601,10 @@ export function RaceScreen({ session, game, meId }: Props) {
           of: order.length,
           lap,
           speed: Math.round(Math.abs(focus?.v ?? 0) * KMH),
+          gear: gearFor(focus?.v ?? 0),
+          lapTime: fmtTime(m.finished ? m.lastLap : now < g.goAt ? 0 : now - m.lapStart),
+          best: m.best ? fmtTime(m.best) : "",
+          lights,
           item: playing ? m.item : 0,
           district: districtAt(playing && c ? c.s : focus ? nearestS(focus) : 0),
           clock: fmtTime(now - g.goAt),
@@ -649,9 +661,9 @@ export function RaceScreen({ session, game, meId }: Props) {
   });
 
   const watching = !game.isPlayer || !game.me;
-  const top = hud.board.slice(0, 5);
+  const top = hud.board.slice(0, 10);
   const mine = hud.board.find((b) => b.me);
-  const shown = mine && !top.includes(mine) ? [...top.slice(0, 4), mine] : top;
+  const shown = mine && !top.includes(mine) ? [...top.slice(0, 9), mine] : top;
 
   const itemButton = (
     <button
@@ -674,9 +686,10 @@ export function RaceScreen({ session, game, meId }: Props) {
   return (
     <div className={`race-stage${full ? " full" : ""}`}>
       <div className="race-frame">
+        <canvas ref={glRef} className="race-canvas" aria-hidden="true" />
         <canvas
           ref={canvasRef}
-          className="race-canvas"
+          className="race-canvas race-overlay"
           tabIndex={0}
           role="img"
           aria-label={
@@ -685,46 +698,61 @@ export function RaceScreen({ session, game, meId }: Props) {
               : `Lagos Rush. You are ${ordinal(hud.pos)} of ${hud.of}, lap ${hud.lap} of ${game.laps}, in ${hud.district}.`
           }
         />
+        {noGl && (
+          <p className="race-nogl" role="alert">
+            Lagos Rush needs 3D graphics (WebGL), which this browser has turned off. Try another browser or turn on
+            hardware acceleration.
+          </p>
+        )}
 
-        <div className="race-hud-top">
-          {!watching && (
-            <div className="race-pos" aria-hidden="true">
-              <b className="sg-num">
-                {hud.pos}
-                <small>{ordinal(hud.pos).replace(/\d+/, "")}</small>
-              </b>
-              <span className="sg-num">
-                / {hud.of} · Lap {hud.lap}/{game.laps}
-              </span>
-            </div>
-          )}
-          <div className="race-mid">
-            <span className="race-clock sg-num" role="timer" aria-label={`Race time ${hud.clock}`}>
-              {hud.count !== null && hud.count > 0 ? "0:00.0" : hud.clock}
-            </span>
-            <span className="race-district">{hud.district}</span>
+        <div className="race-tower" aria-label="Positions">
+          <div className="race-tower-head">
+            <span>Lap</span>
+            <b className="sg-num">
+              {hud.lap}
+              <small>/{game.laps}</small>
+            </b>
           </div>
+          <ol>
+            {shown.map((b) => (
+              <li key={b.n} className={b.me ? "me" : ""} style={{ "--c": carPaint(b.n) } as React.CSSProperties}>
+                <span className="sg-num">{b.place}</span>
+                <i aria-hidden="true" />
+                <abbr title={b.me ? "You" : b.name}>{b.me ? "YOU" : tla(b.name)}</abbr>
+                {b.done && <Flag aria-label="finished" size={11} />}
+              </li>
+            ))}
+          </ol>
         </div>
 
-        <ol className="race-board" aria-label="Positions">
-          {shown.map((b) => (
-            <li key={b.n} className={b.me ? "me" : ""} style={{ "--c": carPaint(b.n) } as React.CSSProperties}>
-              <span className="sg-num">{b.place}</span>
-              <i aria-hidden="true" />
-              {b.me ? "You" : b.name}
-              {b.done && <Flag aria-label="finished" size={12} />}
-            </li>
-          ))}
-        </ol>
+        <div className="race-timing">
+          <span className="race-clock sg-num" role="timer" aria-label={`Race time ${hud.clock}`}>
+            {hud.count !== null && hud.count > 0 ? "0:00.0" : hud.clock}
+          </span>
+          {!watching && (
+            <span className="race-lap sg-num">
+              <small>Lap</small> {hud.lapTime}
+            </span>
+          )}
+          {!watching && hud.best && (
+            <span className="race-lap best sg-num">
+              <small>Best</small> {hud.best}
+            </span>
+          )}
+        </div>
+        <span className="race-district">{hud.district}</span>
 
         {hud.count !== null && (
           <div className={`race-count${hud.count === 0 ? " go" : ""}`} aria-live="assertive">
             <div className="race-lights" aria-hidden="true">
-              {[3, 2, 1].map((n) => (
-                <i key={n} className={hud.count === 0 ? "go" : hud.count !== null && hud.count <= n ? "on" : ""} />
+              {[1, 2, 3, 4, 5].map((n) => (
+                <span key={n}>
+                  <i className={hud.lights >= n ? "on" : ""} />
+                  <i className={hud.lights >= n ? "on" : ""} />
+                </span>
               ))}
             </div>
-            <b>{hud.count === 0 ? "GO!" : hud.count}</b>
+            <b>{hud.count === 0 ? "GO!" : <span className="visually-hidden">{hud.count}</span>}</b>
           </div>
         )}
 
@@ -741,10 +769,17 @@ export function RaceScreen({ session, game, meId }: Props) {
         )}
 
         {!watching && (
-          <div className={`race-dash${touch ? " touch" : ""}`}>
+          <div className="race-dash">
+            <span className="race-place sg-num" aria-hidden="true">
+              P{hud.pos}
+              <small>/{hud.of}</small>
+            </span>
             <span className="race-speed sg-num" aria-label={`${hud.speed} kilometres an hour`}>
               {hud.speed}
               <small>km/h</small>
+            </span>
+            <span className="race-gear sg-num" aria-hidden="true">
+              {hud.gear}
             </span>
             {!touch && itemButton}
           </div>
@@ -1014,66 +1049,27 @@ function flame(ps: Particle[], c: CarState) {
 // ---------------------------------------------------------------------------------------------
 // Drawing. The city is always a night-time neon scene, whatever the page theme.
 
-const COLORS = {
-  body: "Inter, system-ui, sans-serif",
-  display: "system-ui, sans-serif",
-  ground: "#0c0a1c",
-  water: "#071a42",
-  waterLine: "rgba(80, 170, 255, 0.22)",
-  shoulder: "#2a2238",
-  road: "#1c1a2b",
-  lane: "rgba(255, 255, 255, 0.28)",
-  edge: "#ff4fd8",
-  rail: "#4fe3ff",
-  ink: "#0d0b1f",
-  danfo: "#ffc21a",
-};
+const FONT = "Inter, system-ui, sans-serif";
+
+/** Gear on the dash, from the speed shown beside it. */
+function gearFor(v: number) {
+  if (v < -5) return "R";
+  const kmh = v * KMH;
+  if (kmh < 4) return "N";
+  return String(Math.min(8, 1 + Math.floor(kmh / 38)));
+}
 
 interface Scenery {
-  shoulder: Path2D;
-  road: Path2D;
-  lanes: Path2D;
-  edges: Path2D;
-  rails: Path2D;
-  barriers: Path2D;
-  water: Path2D;
-  ripples: Path2D;
-  start: Array<{ x: number; y: number; h: number; d: number; dark: boolean }>;
-  buildings: Array<{
-    x: number;
-    y: number;
-    a: number;
-    w: number;
-    h: number;
-    c: string;
-    lit: string;
-    windows: number[];
-  }>;
-  lamps: Array<{ x: number; y: number }>;
-  signs: Array<{ x: number; y: number; h: number; name: string }>;
   mini: Path2D;
   miniBridge: Path2D;
 }
 
 let scenery: Scenery | null = null;
 
-/** The track's paths and props never change, so they are built once. */
+/** The minimap's paths never change, so they are built once. */
 function getScenery(): Scenery {
   if (scenery) return scenery;
-  const ring = (d: (i: number) => number) => {
-    const p = new Path2D();
-    for (const side of [1, -1]) {
-      for (let i = 0; i <= T.count; i++) {
-        const k = i % T.count;
-        const pt = trackPoint(k * T.step, side * d(k));
-        if (i === 0) p.moveTo(pt.x, pt.y);
-        else p.lineTo(pt.x, pt.y);
-      }
-      p.closePath();
-    }
-    return p;
-  };
-  const line = (d: (i: number) => number, keep: (i: number) => boolean) => {
+  const line = (keep: (i: number) => boolean) => {
     const p = new Path2D();
     let open = false;
     for (let i = 0; i <= T.count; i++) {
@@ -1082,256 +1078,15 @@ function getScenery(): Scenery {
         open = false;
         continue;
       }
-      const pt = trackPoint(k * T.step, d(k));
+      const pt = trackPoint(k * T.step, 0);
       if (open) p.lineTo(pt.x, pt.y);
       else p.moveTo(pt.x, pt.y);
       open = true;
     }
     return p;
   };
-  const bridge = (i: number) => T.zone[i] === "bridge";
-  const lanes = new Path2D();
-  for (const d of [-80, 0, 80])
-    lanes.addPath(
-      line(
-        () => d,
-        () => true,
-      ),
-    );
-  const edges = new Path2D();
-  for (const side of [-1, 1])
-    edges.addPath(
-      line(
-        (i) => side * T.half[i]!,
-        () => true,
-      ),
-    );
-  const rails = new Path2D();
-  const barriers = new Path2D();
-  for (const side of [-1, 1]) {
-    rails.addPath(line((i) => side * T.wall[i]!, bridge));
-    barriers.addPath(
-      line(
-        (i) => side * T.wall[i]!,
-        (i) => !bridge(i),
-      ),
-    );
-  }
-  const water = line(() => 0, bridge);
-  const ripples = new Path2D();
-  for (const d of [-1300, -900, -500, 500, 900, 1300]) ripples.addPath(line(() => d, bridge));
-
-  const rnd = mulberry32(9);
-  const bridgeSamples: Array<[number, number]> = [];
-  for (let i = 0; i < T.count; i += 4) if (bridge(i)) bridgeSamples.push([T.x[i]!, T.y[i]!]);
-  const nearTrack = (x: number, y: number, clear: number) => {
-    for (let i = 0; i < T.count; i += 2) if ((T.x[i]! - x) ** 2 + (T.y[i]! - y) ** 2 < clear * clear) return true;
-    return false;
-  };
-  const inWater = (x: number, y: number) => bridgeSamples.some(([bx, by]) => (bx - x) ** 2 + (by - y) ** 2 < 1700 ** 2);
-  const hues = ["#2a1f5c", "#3a1f4f", "#1f2d5c", "#2b2448", "#3b2a1f"];
-  const lights = ["#ffd36b", "#4fe3ff", "#ff7ac8", "#a8ff4a"];
-  const buildings: Scenery["buildings"] = [];
-  for (let i = 0; i < T.count; i += 3) {
-    if (bridge(i)) continue;
-    for (const side of [-1, 1]) {
-      if (rnd() < 0.25) continue;
-      const w = 90 + rnd() * 140;
-      const h = 70 + rnd() * 110;
-      const off = T.wall[i]! + 50 + h / 2 + rnd() * 120;
-      const p = trackPoint(i * T.step + rnd() * 60, side * off);
-      if (inWater(p.x, p.y) || nearTrack(p.x, p.y, T.wall[i]! + Math.max(w, h) / 2 + 20)) continue;
-      const windows: number[] = [];
-      for (let k = 0; k < 10; k++) windows.push(rnd());
-      buildings.push({
-        x: p.x,
-        y: p.y,
-        a: p.h,
-        w,
-        h,
-        c: hues[Math.floor(rnd() * hues.length)]!,
-        lit: lights[Math.floor(rnd() * lights.length)]!,
-        windows,
-      });
-    }
-  }
-  const lamps: Scenery["lamps"] = [];
-  for (let i = 0; i < T.count; i += 6)
-    for (const side of [-1, 1]) lamps.push(trackPoint(i * T.step, side * (T.wall[i]! + 6)));
-  const signs = T.districts.map((d) => {
-    const s = d.s + 160;
-    const p = trackPoint(s, T.half[Math.floor(s / T.step) % T.count]! + 70);
-    return { ...p, name: d.name };
-  });
-  const start: Scenery["start"] = [];
-  for (let row = 0; row < 2; row++)
-    for (let d = -150; d < 150; d += 20) {
-      const p = trackPoint(row * 20 - 10, d + 10);
-      start.push({ ...p, d, dark: (row + d / 20) % 2 === 0 });
-    }
-  const mini = line(
-    () => 0,
-    () => true,
-  );
-  const miniBridge = line(() => 0, bridge);
-  scenery = {
-    shoulder: ring((i) => T.wall[i]!),
-    road: ring((i) => T.half[i]!),
-    lanes,
-    edges,
-    rails,
-    barriers,
-    water,
-    ripples,
-    start,
-    buildings,
-    lamps,
-    signs,
-    mini,
-    miniBridge,
-  };
+  scenery = { mini: line(() => true), miniBridge: line((i) => T.zone[i] === "bridge") };
   return scenery;
-}
-
-function drawScenery(
-  ctx: CanvasRenderingContext2D,
-  s: Scenery,
-  t: number,
-  still: boolean,
-  near: (x: number, y: number, pad?: number) => boolean,
-  overview: boolean,
-) {
-  // The lagoon under the bridges.
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = COLORS.water;
-  ctx.lineWidth = 3400;
-  ctx.stroke(s.water);
-  ctx.strokeStyle = COLORS.waterLine;
-  ctx.lineWidth = 8;
-  ctx.setLineDash([60, 140]);
-  ctx.lineDashOffset = still ? 0 : -t / 40;
-  ctx.stroke(s.ripples);
-  ctx.setLineDash([]);
-
-  if (!overview)
-    for (const b of s.buildings) {
-      if (!near(b.x, b.y, 300)) continue;
-      ctx.save();
-      ctx.translate(b.x, b.y);
-      ctx.rotate(b.a);
-      ctx.fillStyle = b.c;
-      ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
-      ctx.lineWidth = 3;
-      ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h);
-      // Rooftop lights.
-      ctx.fillStyle = b.lit;
-      for (let k = 0; k < b.windows.length; k++) {
-        if (b.windows[k]! < 0.55) continue;
-        const wx = -b.w / 2 + 12 + ((k % 5) * (b.w - 24)) / 5;
-        const wy = -b.h / 2 + 12 + (Math.floor(k / 5) * (b.h - 24)) / 2;
-        ctx.globalAlpha = 0.35 + b.windows[k]! * 0.5;
-        ctx.fillRect(wx, wy, 10, 7);
-      }
-      ctx.globalAlpha = 1;
-      ctx.restore();
-    }
-
-  ctx.fillStyle = COLORS.shoulder;
-  ctx.fill(s.shoulder, "evenodd");
-  ctx.fillStyle = COLORS.road;
-  ctx.fill(s.road, "evenodd");
-  ctx.strokeStyle = COLORS.lane;
-  ctx.lineWidth = overview ? 0 : 4;
-  if (!overview) {
-    ctx.setLineDash([46, 54]);
-    ctx.stroke(s.lanes);
-    ctx.setLineDash([]);
-  }
-  ctx.lineWidth = overview ? 24 : 5;
-  ctx.strokeStyle = COLORS.edge;
-  ctx.globalAlpha = 0.7;
-  ctx.stroke(s.edges);
-  ctx.globalAlpha = 1;
-  ctx.lineWidth = overview ? 30 : 8;
-  ctx.strokeStyle = COLORS.rail;
-  ctx.stroke(s.rails);
-  ctx.strokeStyle = "#5a4f7a";
-  ctx.stroke(s.barriers);
-
-  if (overview) return;
-  // Street lights.
-  for (const l of s.lamps) {
-    if (!near(l.x, l.y)) continue;
-    ctx.fillStyle = "rgba(255, 211, 107, 0.07)";
-    ctx.beginPath();
-    ctx.arc(l.x, l.y, 22, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffe7a8";
-    ctx.beginPath();
-    ctx.arc(l.x, l.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // The start line.
-  for (const q of s.start) {
-    ctx.save();
-    ctx.translate(q.x, q.y);
-    ctx.rotate(q.h);
-    ctx.fillStyle = q.dark ? "#0d0b1f" : "#ffffff";
-    ctx.fillRect(-10, -10, 20, 20);
-    ctx.restore();
-  }
-  // District signs, readable from the driver's seat.
-  for (const sg of s.signs) {
-    if (!near(sg.x, sg.y)) continue;
-    ctx.save();
-    ctx.translate(sg.x, sg.y);
-    ctx.rotate(sg.h + Math.PI / 2);
-    ctx.font = `800 26px ${COLORS.display}`;
-    const w = ctx.measureText(sg.name).width + 36;
-    ctx.fillStyle = "#0f7a43";
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 4;
-    roundRect(ctx, -w / 2, -26, w, 52, 8);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#ffffff";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(sg.name, 0, 1);
-    ctx.textBaseline = "alphabetic";
-    ctx.restore();
-  }
-}
-
-/** The Lekki toll gantry over the start line, drawn over the cars. */
-function drawGantry(ctx: CanvasRenderingContext2D) {
-  const p = trackPoint(70, 0);
-  ctx.save();
-  ctx.translate(p.x, p.y);
-  ctx.rotate(p.h);
-  ctx.globalAlpha = 0.88;
-  ctx.fillStyle = "#2b2160";
-  ctx.fillRect(-22, -250, 44, 500);
-  ctx.strokeStyle = "#ffc21a";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(-22, -250, 44, 500);
-  for (let d = -200; d <= 200; d += 80) {
-    ctx.fillStyle = d === 0 ? "#3fd08b" : "#ff5a4e";
-    ctx.beginPath();
-    ctx.arc(0, d, 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.rotate(Math.PI / 2);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = "#ffc21a";
-  ctx.font = `800 22px ${COLORS.display}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("LEKKI TOLL GATE", 0, 0);
-  ctx.textBaseline = "alphabetic";
-  ctx.restore();
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -1344,273 +1099,6 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-function drawCar(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  h: number,
-  n: number,
-  boost: boolean,
-  size: number,
-  t: number,
-  isMe = false,
-  spinning = false,
-) {
-  const L = R.car.length * size;
-  const W = R.car.width * size;
-  const paint = carPaint(n);
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(h);
-  if (isMe) {
-    ctx.strokeStyle = spinning ? "#ff4fd8" : "rgba(255,255,255,0.85)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, L * 0.75, W * 1.1, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  if (boost) {
-    ctx.fillStyle = `rgba(79, 227, 255, ${0.5 + 0.3 * Math.sin(t / 40)})`;
-    ctx.beginPath();
-    ctx.moveTo(-L / 2, -W / 3);
-    ctx.lineTo(-L / 2 - 26 * size, 0);
-    ctx.lineTo(-L / 2, W / 3);
-    ctx.fill();
-  }
-  // Shadow, body, stripes, glass and lights.
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  roundRect(ctx, -L / 2 + 3, -W / 2 + 3, L, W, 6 * size);
-  ctx.fill();
-  ctx.fillStyle = paint;
-  roundRect(ctx, -L / 2, -W / 2, L, W, 6 * size);
-  ctx.fill();
-  ctx.strokeStyle = COLORS.ink;
-  ctx.lineWidth = 2.5;
-  ctx.stroke();
-  const stripes = Math.floor(n / PAINT.length) % 3;
-  ctx.fillStyle = COLORS.ink;
-  if (stripes === 1) ctx.fillRect(-L / 2, -2 * size, L, 4 * size);
-  if (stripes === 2) {
-    ctx.fillRect(-L / 2, -5 * size, L, 3 * size);
-    ctx.fillRect(-L / 2, 2 * size, L, 3 * size);
-  }
-  ctx.fillStyle = "rgba(13, 11, 31, 0.8)";
-  roundRect(ctx, 2 * size, -W / 2 + 3 * size, 8 * size, W - 6 * size, 2);
-  ctx.fill();
-  roundRect(ctx, -L / 2 + 5 * size, -W / 2 + 3 * size, 5 * size, W - 6 * size, 2);
-  ctx.fill();
-  ctx.fillStyle = "#fff6c8";
-  ctx.fillRect(L / 2 - 3 * size, -W / 2 + 2, 3 * size, 4 * size);
-  ctx.fillRect(L / 2 - 3 * size, W / 2 - 2 - 4 * size, 3 * size, 4 * size);
-  ctx.fillStyle = "#ff3d6e";
-  ctx.fillRect(-L / 2, -W / 2 + 2, 2 * size, 4 * size);
-  ctx.fillRect(-L / 2, W / 2 - 2 - 4 * size, 2 * size, 4 * size);
-  ctx.restore();
-}
-
-function drawBox(ctx: CanvasRenderingContext2D, x: number, y: number, t: number, still: boolean) {
-  const a = still ? 0.4 : t / 600;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = "rgba(255, 79, 216, 0.18)";
-  ctx.beginPath();
-  ctx.arc(0, 0, 30, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.rotate(a);
-  ctx.fillStyle = "#2b1d63";
-  ctx.strokeStyle = "#4fe3ff";
-  ctx.lineWidth = 3;
-  roundRect(ctx, -15, -15, 30, 30, 6);
-  ctx.fill();
-  ctx.stroke();
-  ctx.rotate(-a);
-  ctx.fillStyle = "#ffd36b";
-  ctx.font = `900 22px ${COLORS.display}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("?", 0, 1);
-  ctx.textBaseline = "alphabetic";
-  ctx.restore();
-}
-
-function drawSlick(ctx: CanvasRenderingContext2D, x: number, y: number, id: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(id);
-  ctx.fillStyle = "#06050c";
-  ctx.beginPath();
-  ctx.ellipse(0, 0, R.slick.radius + 4, R.slick.radius - 4, 0, 0, Math.PI * 2);
-  ctx.ellipse(12, 8, 14, 10, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(200, 107, 255, 0.55)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.ellipse(-4, -3, 14, 8, 0.4, 0, Math.PI * 1.3);
-  ctx.stroke();
-  ctx.restore();
-}
-
-const SEDANS = ["#c9ced8", "#6b7385", "#b23a3a", "#2d5fa8", "#e8e8e8", "#3c3c46"];
-const UMBRELLAS = [
-  ["#ff5a4e", "#ffffff"],
-  ["#2f9bff", "#ffc53d"],
-  ["#3fd08b", "#ffffff"],
-  ["#ff7ac8", "#ffc53d"],
-];
-
-function drawObstacle(
-  ctx: CanvasRenderingContext2D,
-  kind: ObstacleKind,
-  x: number,
-  y: number,
-  h: number,
-  v: number,
-  signal: boolean,
-  t: number,
-  side = 1,
-) {
-  const k = OBSTACLE_KINDS[kind];
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(h);
-  const L = k.hs * 2;
-  const W = k.hd * 2;
-  if (kind === "pothole") {
-    ctx.fillStyle = "#0a0812";
-    ctx.beginPath();
-    ctx.ellipse(0, 0, k.hs, k.hd, v, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#3d3550";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.fillStyle = "rgba(80, 170, 255, 0.25)";
-    ctx.beginPath();
-    ctx.ellipse(3, 2, k.hs * 0.5, k.hd * 0.4, v, 0, Math.PI * 2);
-    ctx.fill();
-  } else if (kind === "cone") {
-    ctx.fillStyle = "#ff8a1f";
-    ctx.beginPath();
-    ctx.arc(0, 0, 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
-    ctx.stroke();
-  } else if (kind === "stall") {
-    const [a, b] = UMBRELLAS[v % UMBRELLAS.length]!;
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.beginPath();
-    ctx.arc(4, 4, 27, 0, Math.PI * 2);
-    ctx.fill();
-    for (let i = 0; i < 8; i++) {
-      ctx.fillStyle = i % 2 ? a! : b!;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, 27, (i / 8) * Math.PI * 2, ((i + 1) / 8) * Math.PI * 2);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.strokeStyle = COLORS.ink;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, 27, 0, Math.PI * 2);
-    ctx.stroke();
-  } else if (kind === "keke") {
-    ctx.fillStyle = "#ffc21a";
-    roundRect(ctx, -L / 2, -W / 2, L, W, 6);
-    ctx.fill();
-    ctx.fillStyle = "#1fa65a";
-    roundRect(ctx, -L / 2 + 4, -W / 2 + 2, L - 12, W - 4, 4);
-    ctx.fill();
-    ctx.strokeStyle = COLORS.ink;
-    ctx.lineWidth = 2;
-    roundRect(ctx, -L / 2, -W / 2, L, W, 6);
-    ctx.stroke();
-  } else if (kind === "danfo") {
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    roundRect(ctx, -L / 2 + 4, -W / 2 + 4, L, W, 5);
-    ctx.fill();
-    ctx.fillStyle = COLORS.danfo;
-    roundRect(ctx, -L / 2, -W / 2, L, W, 5);
-    ctx.fill();
-    ctx.fillStyle = COLORS.ink;
-    ctx.fillRect(-L / 2, -W / 2 + 6, L, 3);
-    ctx.fillRect(-L / 2, W / 2 - 9, L, 3);
-    ctx.fillStyle = "rgba(13,11,31,0.75)";
-    ctx.fillRect(L / 2 - 12, -W / 2 + 3, 8, W - 6);
-    // Roof rack.
-    ctx.strokeStyle = "#7a5a00";
-    ctx.lineWidth = 2;
-    for (let i = -2; i <= 1; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * 12, -W / 2 + 10);
-      ctx.lineTo(i * 12, W / 2 - 10);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = COLORS.ink;
-    ctx.lineWidth = 2.5;
-    roundRect(ctx, -L / 2, -W / 2, L, W, 5);
-    ctx.stroke();
-    // About to pull over: the indicator on the kerb side flashes.
-    if (signal && Math.floor(t / 250) % 2 === 0) {
-      ctx.fillStyle = "#ff9a1f";
-      const yy = side > 0 ? W / 2 - 4 : -W / 2;
-      ctx.fillRect(L / 2 - 6, yy, 6, 4);
-      ctx.fillRect(-L / 2, yy, 6, 4);
-      ctx.fillStyle = "rgba(255,154,31,0.35)";
-      ctx.beginPath();
-      ctx.arc(L / 2, yy + 2, 14, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else if (kind === "okada") {
-    ctx.strokeStyle = "#1a1a24";
-    ctx.lineWidth = 6;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-L / 2, 0);
-    ctx.lineTo(L / 2, 0);
-    ctx.stroke();
-    ctx.strokeStyle = "#9aa0b4";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(L / 2 - 4, -7);
-    ctx.lineTo(L / 2 - 4, 7);
-    ctx.stroke();
-    ctx.fillStyle = ["#ff5a4e", "#2f9bff", "#ffc53d", "#3fd08b"][v % 4]!;
-    ctx.beginPath();
-    ctx.arc(-2, 0, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = COLORS.ink;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = "#fff6c8";
-    ctx.beginPath();
-    ctx.arc(L / 2 + 1, 0, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    // A car stuck in go-slow, brake lights on.
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    roundRect(ctx, -L / 2 + 3, -W / 2 + 3, L, W, 6);
-    ctx.fill();
-    ctx.fillStyle = SEDANS[v % SEDANS.length]!;
-    roundRect(ctx, -L / 2, -W / 2, L, W, 6);
-    ctx.fill();
-    ctx.strokeStyle = COLORS.ink;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = "rgba(13,11,31,0.7)";
-    ctx.fillRect(2, -W / 2 + 3, 8, W - 6);
-    ctx.fillRect(-L / 2 + 6, -W / 2 + 3, 6, W - 6);
-    ctx.fillStyle = "#ff2d55";
-    ctx.fillRect(-L / 2 - 1, -W / 2 + 2, 3, 5);
-    ctx.fillRect(-L / 2 - 1, W / 2 - 7, 3, 5);
-    ctx.fillStyle = "rgba(255,45,85,0.25)";
-    ctx.fillRect(-L / 2 - 14, -W / 2, 14, W);
-  }
-  ctx.restore();
-}
-
 function drawMinimap(
   ctx: CanvasRenderingContext2D,
   s: Scenery,
@@ -1621,14 +1109,15 @@ function drawMinimap(
   myN: number,
 ) {
   const b = T.bounds;
-  const size = Math.min(190, w * 0.24);
+  const size = Math.min(170, w * 0.2, h * 0.34);
   const sc = size / Math.max(b.maxX - b.minX, b.maxY - b.minY);
   const mw = (b.maxX - b.minX) * sc;
   const mh = (b.maxY - b.minY) * sc;
   const x0 = w - mw - 18;
-  const y0 = 12;
+  // Under the timing box, clear of the touch controls at the bottom.
+  const y0 = Math.min(h - mh - 18, 92);
   ctx.save();
-  ctx.fillStyle = "rgba(11, 8, 32, 0.78)";
+  ctx.fillStyle = "rgba(21, 21, 30, 0.8)";
   roundRect(ctx, x0 - 8, y0 - 6, mw + 16, mh + 12, 10);
   ctx.fill();
   ctx.translate(x0 - b.minX * sc, y0 - b.minY * sc);
@@ -1638,7 +1127,7 @@ function drawMinimap(
   ctx.strokeStyle = "rgba(255,255,255,0.55)";
   ctx.lineWidth = 3 / sc;
   ctx.stroke(s.mini);
-  ctx.strokeStyle = COLORS.rail;
+  ctx.strokeStyle = "#4fb3ff";
   ctx.lineWidth = 4 / sc;
   ctx.stroke(s.miniBridge);
   for (const c of world) {
