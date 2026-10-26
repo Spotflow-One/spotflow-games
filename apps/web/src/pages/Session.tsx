@@ -27,6 +27,7 @@ import { usePreferences } from "../lib/preferences";
 import { getSocket, request } from "../lib/socket";
 import { playSound } from "../lib/sound";
 import { Avatar } from "../components/Avatar";
+import { HowYouAppear } from "../components/HowYouAppear";
 import { GameIcon } from "../components/GameIcon";
 import { DrawScreen } from "../games/DrawScreen";
 import { QuizScreen } from "../games/QuizScreen";
@@ -184,6 +185,15 @@ export function Session() {
       )}
 
       {(view.status === "results" || view.status === "completed") && <Results view={view} meId={me.id} />}
+
+      {(view.status === "lobby" || view.status === "ready") && (
+        <HowYouAppear
+          code={code}
+          you={view.participants.find((p) => p.userId === me.id)}
+          onJoined={setView}
+          onError={setNotice}
+        />
+      )}
 
       <section className="sg-card sg-stack" aria-labelledby="players-heading">
         <div className="sg-row">

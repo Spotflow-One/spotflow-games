@@ -4,7 +4,8 @@ import type { SessionView } from "./session.js";
 export type Ack<T = undefined> = (res: { ok: true; data: T } | { ok: false; error: string }) => void;
 
 export interface ClientToServerEvents {
-  "session:join": (payload: { code: string }, ack: Ack<SessionView>) => void;
+  /** `alias` sets the name shown in this session only; leave it out to keep the current one. */
+  "session:join": (payload: { code: string; alias?: string | null }, ack: Ack<SessionView>) => void;
   "session:leave": (payload: { code: string }, ack: Ack) => void;
   "session:ready": (payload: { code: string }, ack: Ack) => void;
   "session:reopen": (payload: { code: string }, ack: Ack) => void;

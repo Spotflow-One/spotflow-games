@@ -20,6 +20,16 @@ export interface Me extends PublicProfile {
   soundEnabled: boolean;
 }
 
+export const ALIAS_MAX_LENGTH = 24;
+
+/** A name for one game session only. Empty means use the display name. */
+export const aliasSchema = z
+  .string()
+  .trim()
+  .max(ALIAS_MAX_LENGTH)
+  .transform((v) => v || null)
+  .nullable();
+
 export const updateMeSchema = z
   .object({
     displayName: z.string().trim().min(1).max(40).optional(),

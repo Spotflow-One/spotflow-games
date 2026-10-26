@@ -110,6 +110,44 @@ describe("auth", () => {
   });
 });
 
+describe("game aliases", () => {
+  it("shows an alias for one session only, without saving it to the account", async () => {
+    const cookie = await signIn("alias@spotflow.one", "Real Name");
+    const newSession = async () => {
+      const res = await fetch(`${base}/api/sessions`, {
+        method: "POST",
+        headers: { ...headers, cookie },
+        body: JSON.stringify({ gameType: "quiz", config: {}, hostPlays: true, allowLateJoin: false }),
+      });
+      return ((await res.json()) as { code: string }).code;
+    };
+    // A fresh socket each time, like a reconnect, and to stay under the join rate limit.
+    const nameIn = async (code: string, payload: object = {}) => {
+      const res = await emit<SessionView>(await socketFor(cookie), "session:join", { code, ...payload });
+      if (!res.ok) throw new Error(res.error);
+      return res.data.participants.find((p) => p.isHost)!.displayName;
+    };
+
+    const code = await newSession();
+    expect(await nameIn(code, { alias: "  Captain  " })).toBe("Captain");
+    // Reconnecting without an alias keeps the one picked for this session.
+    expect(await nameIn(code)).toBe("Captain");
+    expect(await emit(await socketFor(cookie), "session:join", { code, alias: "x".repeat(25) })).toEqual({
+      ok: false,
+      error: "Invalid request",
+    });
+
+    // The account and the next session still use the real name.
+    const me = await (await fetch(`${base}/api/me`, { headers: { cookie } })).json();
+    expect(me.displayName).toBe("Real Name");
+    expect(me).not.toHaveProperty("alias");
+    expect(await nameIn(await newSession())).toBe("Real Name");
+
+    // Clearing the alias goes back to the real name.
+    expect(await nameIn(code, { alias: "" })).toBe("Real Name");
+  });
+});
+
 describe("quizzes", () => {
   it("lists curated quizzes without leaking questions or answers", async () => {
     const cookie = await signIn("quizzer@spotflow.one", "Quizzer");
