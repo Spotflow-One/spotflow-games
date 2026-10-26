@@ -152,7 +152,7 @@ describe("a full session over sockets", () => {
     // A second tab for the same account is the same participant.
     const player2 = await socketFor(playerCookie);
     await emit(player2, "session:join", { code });
-    expect(ctx.manager.get(code)!.participants.size).toBe(2);
+    expect((await ctx.manager.info(code))!.playerCount).toBe(2);
 
     expect(await emit(player, "session:start", { code })).toEqual({ ok: false, error: "Only the host can do that" });
     expect(await emit(host, "session:start", { code })).toMatchObject({ ok: true });

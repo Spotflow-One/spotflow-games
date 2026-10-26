@@ -21,13 +21,24 @@ export interface PendingScoreEvent {
   at: Date;
 }
 
+/** Bulky per-session data kept outside the snapshot (see GameContext.appendLog). */
+export interface RoomLog {
+  append(entry: unknown): void;
+  clear(): void;
+  /** Deliver the whole log to a player, wrapped as a game event. */
+  sendTo(userId: string, wrap: (entries: unknown[]) => unknown): void;
+}
+
 /** How a room reaches clients and storage. Implemented by the socket layer and session manager. */
 export interface RoomHooks {
-  sendState(userId: string, view: SessionView): void;
+  /** Each connected participant's own view, pushed in one batch. */
+  sendStates(views: Array<[userId: string, view: SessionView]>): void;
   sendEvent(userIds: string[], event: unknown): void;
   /** Called once when gameplay ends, to persist results. */
   onResults(room: Room): void;
   onClosed(room: Room, reason: string): void;
+  /** Defaults to an in-memory log. */
+  log?: RoomLog;
 }
 
 export interface RoomInit {
@@ -41,8 +52,42 @@ export interface RoomInit {
   createdAt: Date;
 }
 
+export interface RoomOptions {
+  now?: () => number;
+  /**
+   * Fire timers with setTimeout in this process. Off when a shared store fires them instead,
+   * because the room may be loaded on a different server instance by then.
+   */
+  localTimers?: boolean;
+}
+
+/** Everything needed to rebuild a room on any server instance. Encode it with codec.ts. */
+export interface RoomSnapshot {
+  init: RoomInit;
+  config: unknown;
+  status: SessionStatus;
+  startedAt: Date | null;
+  endedAt: Date | null;
+  lastActivity: number;
+  participants: RoomParticipant[];
+  removed: string[];
+  scoreEvents: PendingScoreEvent[];
+  awardedKeys: string[];
+  timers: Record<string, number>;
+  gameState: unknown;
+}
+
+function memoryLog(hooks: Pick<RoomHooks, "sendEvent">): RoomLog {
+  let entries: unknown[] = [];
+  return {
+    append: (entry) => void entries.push(entry),
+    clear: () => void (entries = []),
+    sendTo: (userId, wrap) => hooks.sendEvent([userId], wrap([...entries])),
+  };
+}
+
 /**
- * In-memory, server-authoritative state for one live game session.
+ * Server-authoritative state for one live game session.
  * Each room is isolated: errors in one game's engine are caught at the room boundary.
  */
 export class Room {
@@ -57,22 +102,27 @@ export class Room {
   status: SessionStatus = "lobby";
   startedAt: Date | null = null;
   endedAt: Date | null = null;
-  lastActivity = Date.now();
+  lastActivity: number;
 
   readonly participants = new Map<string, RoomParticipant>();
   readonly removed = new Set<string>();
   readonly scoreEvents: PendingScoreEvent[] = [];
+  /** Due times of the game's named timers, in epoch ms. */
+  readonly timers: Record<string, number> = {};
   private awardedKeys = new Set<string>();
-  private timers = new Map<string, NodeJS.Timeout>();
   private gameState: unknown = null;
   private broadcastQueued = false;
   private starting = false;
+  private localTimer: NodeJS.Timeout | null = null;
+  private readonly now: () => number;
+  private readonly localTimers: boolean;
+  private readonly log: RoomLog;
 
   constructor(
-    init: RoomInit,
+    private init: RoomInit,
     private engine: AnyGameEngine | undefined,
     private hooks: RoomHooks,
-    private now: () => number = Date.now,
+    opts: RoomOptions = {},
   ) {
     this.id = init.id;
     this.code = init.code;
@@ -82,10 +132,54 @@ export class Room {
     this.hostPlays = init.hostPlays;
     this.config = init.config;
     this.createdAt = init.createdAt;
+    this.now = opts.now ?? Date.now;
+    this.localTimers = opts.localTimers ?? true;
+    this.lastActivity = this.now();
+    this.log = hooks.log ?? memoryLog(hooks);
+  }
+
+  static fromSnapshot(snap: RoomSnapshot, engine: AnyGameEngine | undefined, hooks: RoomHooks, opts?: RoomOptions) {
+    const room = new Room(snap.init, engine, hooks, opts);
+    room.config = snap.config;
+    room.status = snap.status;
+    room.startedAt = snap.startedAt;
+    room.endedAt = snap.endedAt;
+    room.lastActivity = snap.lastActivity;
+    for (const p of snap.participants) room.participants.set(p.userId, p);
+    for (const id of snap.removed) room.removed.add(id);
+    room.scoreEvents.push(...snap.scoreEvents);
+    for (const key of snap.awardedKeys) room.awardedKeys.add(key);
+    Object.assign(room.timers, snap.timers);
+    room.gameState = snap.gameState;
+    room.armLocalTimer();
+    return room;
+  }
+
+  toSnapshot(): RoomSnapshot {
+    return {
+      init: this.init,
+      config: this.config,
+      status: this.status,
+      startedAt: this.startedAt,
+      endedAt: this.endedAt,
+      lastActivity: this.lastActivity,
+      participants: [...this.participants.values()],
+      removed: [...this.removed],
+      scoreEvents: this.scoreEvents,
+      awardedKeys: [...this.awardedKeys],
+      timers: { ...this.timers },
+      gameState: this.gameState,
+    };
   }
 
   get isLive() {
     return this.status === "lobby" || this.status === "ready" || this.status === "in_progress";
+  }
+
+  /** When the next timer is due, or null if none is set. */
+  nextDeadline(): number | null {
+    const times = Object.values(this.timers);
+    return times.length ? Math.min(...times) : null;
   }
 
   playerIds(): string[] {
@@ -131,8 +225,7 @@ export class Room {
 
   disconnect(userId: string, socketId: string) {
     const p = this.participants.get(userId);
-    if (!p) return;
-    p.socketIds.delete(socketId);
+    if (!p || !p.socketIds.delete(socketId)) return;
     this.broadcast();
   }
 
@@ -224,6 +317,19 @@ export class Room {
     this.engine.handleAction(this.ctx, this.gameState, userId, action);
   }
 
+  /** Runs every timer that is due, in order. Timers set while doing so fire too if already due. */
+  fireDueTimers() {
+    for (let guard = 0; guard < 100 && this.status === "in_progress"; guard++) {
+      const due = Object.entries(this.timers)
+        .filter(([, at]) => at <= this.now())
+        .sort((a, b) => a[1] - b[1])[0];
+      if (!due) break;
+      delete this.timers[due[0]];
+      this.safely(() => this.engine?.onTimer?.(this.ctx, this.gameState, due[0]));
+    }
+    this.armLocalTimer();
+  }
+
   get actionRateLimit() {
     return this.engine?.actionRateLimit ?? 5;
   }
@@ -250,6 +356,12 @@ export class Room {
     this.endedAt = new Date(this.now());
     this.broadcast();
     this.hooks.onClosed(this, reason);
+  }
+
+  /** Stop local timers when this in-process copy of the room is discarded. */
+  dispose() {
+    if (this.localTimer) clearTimeout(this.localTimer);
+    this.localTimer = null;
   }
 
   standings() {
@@ -314,9 +426,11 @@ export class Room {
   }
 
   flush() {
+    const views: Array<[string, SessionView]> = [];
     for (const p of this.participants.values()) {
-      if (p.socketIds.size > 0) this.hooks.sendState(p.userId, this.viewFor(p.userId));
+      if (p.socketIds.size > 0) views.push([p.userId, this.viewFor(p.userId)]);
     }
+    if (views.length) this.hooks.sendStates(views);
   }
 
   private touch() {
@@ -328,8 +442,17 @@ export class Room {
   }
 
   private clearTimers() {
-    for (const t of this.timers.values()) clearTimeout(t);
-    this.timers.clear();
+    for (const name of Object.keys(this.timers)) delete this.timers[name];
+    this.armLocalTimer();
+  }
+
+  /** In local mode, keep one setTimeout pointed at the earliest due timer. */
+  private armLocalTimer() {
+    if (!this.localTimers) return;
+    this.dispose();
+    const next = this.nextDeadline();
+    if (next === null || this.status !== "in_progress") return;
+    this.localTimer = setTimeout(() => this.fireDueTimers(), Math.max(0, next - this.now()));
   }
 
   /** Runs engine code so a crashing game cannot take down the server or other sessions. */
@@ -355,21 +478,13 @@ export class Room {
       now: () => this.now(),
       players: () => this.playerIds(),
       isHost: (userId) => userId === this.hostId,
-      setTimer: (name, ms, fn) => {
-        const old = this.timers.get(name);
-        if (old) clearTimeout(old);
-        this.timers.set(
-          name,
-          setTimeout(() => {
-            this.timers.delete(name);
-            if (this.status === "in_progress") this.safely(fn);
-          }, ms),
-        );
+      setTimer: (name, ms) => {
+        this.timers[name] = this.now() + Math.max(0, ms);
+        this.armLocalTimer();
       },
       clearTimer: (name) => {
-        const t = this.timers.get(name);
-        if (t) clearTimeout(t);
-        this.timers.delete(name);
+        delete this.timers[name];
+        this.armLocalTimer();
       },
       award: (userId, points, reason, key) => {
         const idempotencyKey = `${this.id}:${key}:${userId}`;
@@ -390,6 +505,11 @@ export class Room {
           (id) => id !== opts?.exceptUserId && this.participants.has(id),
         );
         this.hooks.sendEvent(ids, event);
+      },
+      appendLog: (entry) => this.log.append(entry),
+      clearLog: () => this.log.clear(),
+      sendLog: (userId, wrap) => {
+        if (this.participants.has(userId)) this.log.sendTo(userId, wrap);
       },
       finish: () => this.finish(),
     };

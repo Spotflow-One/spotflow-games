@@ -99,7 +99,7 @@ export function DrawCanvas({ strokes, version, tick, canDraw, brush, onStroke, l
 
   useEffect(() => {
     if (!canDraw) return;
-    const t = setInterval(flush, 50);
+    const t = setInterval(flush, 100);
     return () => clearInterval(t);
   }, [canDraw, flush]);
 

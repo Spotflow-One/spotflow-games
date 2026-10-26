@@ -8,7 +8,7 @@ function makeRoom(
   overrides: Partial<{ allowLateJoin: boolean; hostPlays: boolean }> = {},
   engine: AnyGameEngine = testEngine,
 ) {
-  const hooks: RoomHooks = { sendState: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
+  const hooks: RoomHooks = { sendStates: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
   const room = new Room(
     {
       id: "s1",

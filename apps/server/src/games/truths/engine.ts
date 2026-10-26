@@ -46,17 +46,12 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 export function createTruthsEngine(timing: { revealMs: number } = { revealMs: TRUTHS_RULES.revealMs }) {
-  const setPhase = (
-    ctx: GameContext,
-    state: TruthsState,
-    phase: TruthsState["phase"],
-    ms: number,
-    next: () => void,
-  ) => {
+  /** When the phase timer runs out, `onTimer` moves on to the next phase. */
+  const setPhase = (ctx: GameContext, state: TruthsState, phase: TruthsState["phase"], ms: number) => {
     state.phase = phase;
     state.phaseStartedAt = ctx.now();
     state.phaseEndsAt = state.phaseStartedAt + ms;
-    ctx.setTimer("phase", ms, next);
+    ctx.setTimer("phase", ms);
     ctx.broadcastState();
   };
 
@@ -91,7 +86,7 @@ export function createTruthsEngine(timing: { revealMs: number } = { revealMs: TR
     state.roundIndex = index;
     state.votes.clear();
     state.roundPoints.clear();
-    setPhase(ctx, state, "voting", state.config.voteSec * 1000, () => closeVoting(ctx, state));
+    setPhase(ctx, state, "voting", state.config.voteSec * 1000);
   };
 
   const closeVoting = (ctx: GameContext, state: TruthsState) => {
@@ -113,7 +108,7 @@ export function createTruthsEngine(timing: { revealMs: number } = { revealMs: TR
         }
       }
     }
-    setPhase(ctx, state, "reveal", timing.revealMs, () => beginRound(ctx, state, state.roundIndex + 1));
+    setPhase(ctx, state, "reveal", timing.revealMs);
   };
 
   const engine: GameEngine<TruthsConfig, TruthsState> = {
@@ -140,7 +135,7 @@ export function createTruthsEngine(timing: { revealMs: number } = { revealMs: TR
         votes: new Map(),
         roundPoints: new Map(),
       };
-      setPhase(ctx, state, "writing", config.writeSec * 1000, () => startRounds(ctx, state));
+      setPhase(ctx, state, "writing", config.writeSec * 1000);
       return state;
     },
 
@@ -194,6 +189,13 @@ export function createTruthsEngine(timing: { revealMs: number } = { revealMs: TR
         default:
           throw new GameError("Unknown action");
       }
+    },
+
+    onTimer(ctx, state, name) {
+      if (name !== "phase") return;
+      if (state.phase === "writing") startRounds(ctx, state);
+      else if (state.phase === "voting") closeVoting(ctx, state);
+      else beginRound(ctx, state, state.roundIndex + 1);
     },
 
     onPlayerRemoved(ctx, state, userId) {

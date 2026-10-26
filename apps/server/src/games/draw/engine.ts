@@ -39,7 +39,8 @@ interface DrawState {
   /** Correct guessers in order, with how long they took. */
   guessed: Map<string, number>;
   turnPoints: Map<string, number>;
-  strokes: Stroke[];
+  /** Strokes this turn. The strokes themselves live in the session log, outside the state. */
+  strokeCount: number;
   feed: Array<FeedEntry & { onlyFor?: string }>;
   feedSeq: number;
   lastGuessAt: Map<string, number>;
@@ -89,11 +90,12 @@ export function createDrawEngine(
     if (state.feed.length > MAX_FEED) state.feed.splice(0, state.feed.length - MAX_FEED);
   };
 
-  const setPhase = (ctx: GameContext, state: DrawState, phase: DrawState["phase"], ms: number, next: () => void) => {
+  /** When the phase timer runs out, `onTimer` moves on to the next phase. */
+  const setPhase = (ctx: GameContext, state: DrawState, phase: DrawState["phase"], ms: number) => {
     state.phase = phase;
     state.phaseStartedAt = ctx.now();
     state.phaseEndsAt = state.phaseStartedAt + ms;
-    ctx.setTimer("phase", ms, next);
+    ctx.setTimer("phase", ms);
     ctx.broadcastState();
   };
 
@@ -125,10 +127,11 @@ export function createDrawEngine(
     state.revealed.clear();
     state.guessed.clear();
     state.turnPoints.clear();
-    state.strokes = [];
+    state.strokeCount = 0;
+    ctx.clearLog();
     state.lastGuessAt.clear();
     addFeed(state, { userId: state.drawerId, kind: "system", text: "is choosing a word" });
-    setPhase(ctx, state, "choosing", timing.choiceMs, () => chooseWord(ctx, state, randomInt(state.choices.length)));
+    setPhase(ctx, state, "choosing", timing.choiceMs);
   };
 
   const chooseWord = (ctx: GameContext, state: DrawState, index: number) => {
@@ -137,8 +140,8 @@ export function createDrawEngine(
     state.usedWords.add(state.word);
     addFeed(state, { userId: state.drawerId, kind: "system", text: "is drawing" });
     const turnMs = state.config.turnSec * 1000;
-    DRAW_RULES.hintAt.forEach((at, i) => ctx.setTimer(`hint${i}`, turnMs * at, () => revealLetter(ctx, state)));
-    setPhase(ctx, state, "drawing", turnMs, () => endTurn(ctx, state));
+    DRAW_RULES.hintAt.forEach((at, i) => ctx.setTimer(`hint${i}`, turnMs * at));
+    setPhase(ctx, state, "drawing", turnMs);
   };
 
   const revealLetter = (ctx: GameContext, state: DrawState) => {
@@ -163,7 +166,7 @@ export function createDrawEngine(
     } else {
       addFeed(state, { userId: state.drawerId, kind: "system", text: "skipped their turn" });
     }
-    setPhase(ctx, state, "turnEnd", timing.turnEndMs, () => beginTurn(ctx, state, state.turnIndex + 1));
+    setPhase(ctx, state, "turnEnd", timing.turnEndMs);
   };
 
   const handleGuess = (ctx: GameContext, state: DrawState, userId: string, text: unknown) => {
@@ -251,7 +254,7 @@ export function createDrawEngine(
         revealed: new Set(),
         guessed: new Map(),
         turnPoints: new Map(),
-        strokes: [],
+        strokeCount: 0,
         feed: [],
         feedSeq: 0,
         lastGuessAt: new Map(),
@@ -273,18 +276,20 @@ export function createDrawEngine(
         }
         case "stroke": {
           if (state.phase !== "drawing" || userId !== state.drawerId) throw new GameError("Only the drawer can draw");
-          if (state.strokes.length >= CANVAS.maxStrokesPerTurn)
+          if (state.strokeCount >= CANVAS.maxStrokesPerTurn)
             throw new GameError("The canvas is full. Clear it to keep drawing");
           const parsed = strokeSchema.safeParse(action.stroke);
           if (!parsed.success) throw new GameError("That stroke isn't valid");
-          state.strokes.push(parsed.data);
+          state.strokeCount++;
+          ctx.appendLog(parsed.data);
           const event: DrawEvent = { type: "stroke", turn: state.turnIndex, stroke: parsed.data };
           ctx.emitEvent(event, { exceptUserId: userId });
           return;
         }
         case "clear": {
           if (state.phase !== "drawing" || userId !== state.drawerId) throw new GameError("Only the drawer can clear");
-          state.strokes = [];
+          state.strokeCount = 0;
+          ctx.clearLog();
           const event: DrawEvent = { type: "clear", turn: state.turnIndex };
           ctx.emitEvent(event, { exceptUserId: userId });
           return;
@@ -293,8 +298,8 @@ export function createDrawEngine(
           handleGuess(ctx, state, userId, action.text);
           return;
         case "sync": {
-          const event: DrawEvent = { type: "sync", turn: state.turnIndex, strokes: state.strokes };
-          ctx.emitEvent(event, { onlyUserIds: [userId] });
+          const turn = state.turnIndex;
+          ctx.sendLog(userId, (strokes): DrawEvent => ({ type: "sync", turn, strokes: strokes as Stroke[] }));
           return;
         }
         case "skip": {
@@ -311,6 +316,15 @@ export function createDrawEngine(
         default:
           throw new GameError("Unknown action");
       }
+    },
+
+    onTimer(ctx, state, name) {
+      if (name.startsWith("hint")) return revealLetter(ctx, state);
+      if (name !== "phase") return;
+      // A word is picked at random if the drawer doesn't choose in time.
+      if (state.phase === "choosing") chooseWord(ctx, state, randomInt(state.choices.length));
+      else if (state.phase === "drawing") endTurn(ctx, state);
+      else beginTurn(ctx, state, state.turnIndex + 1);
     },
 
     onPlayerRemoved(ctx, state, userId) {
@@ -339,7 +353,7 @@ export function createDrawEngine(
         wordLength: state.word.replace(/ /g, "").length,
         guessedIds: [...state.guessed.keys()],
         isPlayer: viewer.isPlayer,
-        strokeCount: state.strokes.length,
+        strokeCount: state.strokeCount,
         feed: state.feed
           .filter((e) => !e.onlyFor || e.onlyFor === viewer.userId)
           .map(({ onlyFor: _onlyFor, ...e }) => e),

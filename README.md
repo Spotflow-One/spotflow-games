@@ -33,7 +33,7 @@ design-system     Tokens and component CSS exported from the design system
 
 ## Running locally
 
-You need Node 22+ and Postgres 16. `docker compose up -d` starts a local Postgres.
+You need Node 22+ and Postgres 16. `docker compose up -d` starts a local Postgres and Redis. Redis is optional for development: without `REDIS_URL`, live sessions are kept in memory.
 
 ```sh
 cp .env.example .env
@@ -69,7 +69,7 @@ With `DEV_LOGIN=true`, the sign-in page has a developer form that accepts any `@
 npm test
 ```
 
-Server tests run against the `spotflow_games_test` database (override with `TEST_DATABASE_URL`). The schema is reset on each run.
+Server tests run against the `spotflow_games_test` database (override with `TEST_DATABASE_URL`). The schema is reset on each run. The shared-session tests need Redis at `redis://localhost:6379/15` (override with `TEST_REDIS_URL`); they flush that database.
 
 ## Database changes
 
@@ -83,7 +83,9 @@ Edit `apps/server/src/db/schema.ts`, then run `npm run db:generate` and commit t
 
 The `Dockerfile` builds one image that serves the API, WebSockets and the web app on `PORT` (8080 by default). Required in production: `DATABASE_URL`, `APP_URL`, `COOKIE_SECRET`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 
-Live sessions are kept in memory on one instance, so run a single replica, or use sticky sessions, until the sessions get a shared store. One instance handles the launch target of 100 concurrent players. If the process restarts, games in progress are cancelled, and completed results are already saved.
+Set `REDIS_URL` whenever more than one instance may run. Live sessions are then kept in Redis: every change takes a short lock on the game, loads it, applies the change and saves it, so any instance can serve any player. Game timers are saved as due times, and if the instance that set one goes away, another fires it within a few seconds. Updates for players are relayed between instances with Redis pub/sub.
+
+Without `REDIS_URL`, live sessions are kept in memory, so run a single instance. If that process restarts, games in progress are cancelled. Completed results are always saved to Postgres.
 
 ### Vercel
 
@@ -92,5 +94,8 @@ Live sessions are kept in memory on one instance, so run a single replica, or us
 - Set `PORT=8080` (Vercel sends traffic to port 80 unless `PORT` is set, and the image runs as a non-root user that can't bind 80).
 - Set the production variables above, marking `DATABASE_URL`, `COOKIE_SECRET` and `GOOGLE_CLIENT_SECRET` as Sensitive.
 - Make sure Fluid Compute is on (Settings → Functions); WebSockets need it.
+- Add Redis: in the Vercel dashboard, open Storage (or the Marketplace), add Upstash for Redis, and connect it to the project. Set `REDIS_URL` to the database's TCP URL, which starts with `rediss://` (not the REST URL), and mark it Sensitive. Pick the region closest to the Vercel functions.
 
-Caveats while live sessions stay in memory: Vercel can run several instances, and a player on a different instance from the host won't find the session. Vercel also closes WebSocket connections at the function's maximum duration (300 seconds by default), so clients reconnect every few minutes and may land on another instance.
+Vercel runs several instances and closes WebSocket connections at the function's maximum duration (300 seconds by default). Clients reconnect on their own, and with Redis it doesn't matter which instance they land on.
+
+Upstash bills per command on its pay-as-you-go plan. A quiz or Two Truths game uses a few hundred commands, but drawing sends strokes about ten times a second while someone draws, at about ten Redis commands per batch, so a busy Draw & Guess game can use tens of thousands. If Draw & Guess gets regular use, a fixed-price Upstash plan is cheaper.
