@@ -46,6 +46,11 @@ interface Fighter {
   lastHurtAt: number;
   lastMoveAt: number;
   firing: boolean;
+  /** Rolling until then: shots pass through. Missing on games saved before dodging existed. */
+  dodgeUntil?: number;
+  dodgeReadyAt?: number;
+  /** Last dodge counter seen from the client. */
+  lastD?: number;
   eliminations: number;
   deaths: number;
   drones: number;
@@ -138,6 +143,7 @@ export function createClashEngine() {
     f.shieldUntil = ctx.now() + R.spawnShieldMs;
     f.lastMoveAt = ctx.now();
     f.lastHurtAt = 0;
+    f.dodgeUntil = 0;
   };
 
   const addFighter = (ctx: GameContext, state: ClashState, userId: string, team: number) => {
@@ -184,6 +190,7 @@ export function createClashEngine() {
   };
 
   const isShielded = (ctx: GameContext, f: Fighter) => ctx.now() < f.shieldUntil;
+  const isRolling = (now: number, f: Fighter) => now < (f.dodgeUntil ?? 0);
 
   const fire = (ctx: GameContext, state: ClashState, f: Fighter, out: TickOut) => {
     const now = ctx.now();
@@ -235,7 +242,7 @@ export function createClashEngine() {
     by: Fighter | null,
     out: TickOut,
   ) => {
-    if (!f.alive || isShielded(ctx, f)) return;
+    if (!f.alive || isShielded(ctx, f) || isRolling(ctx.now(), f)) return;
     f.hp -= damage;
     f.lastHurtAt = ctx.now();
     out.hurt.add(f.userId);
@@ -301,9 +308,20 @@ export function createClashEngine() {
       }
       const input = parsed.data;
       f.a = input.a;
-      // Accept the client's position only within top speed (with slack for network jitter).
+      // A new dodge counter starts a roll, once the last one has recharged.
+      const dodged = input.d !== undefined && f.lastD !== undefined && input.d !== f.lastD;
+      f.lastD = input.d;
+      // A little leeway, as network jitter can bring a fair second dodge in early.
+      if (dodged && now >= (f.dodgeReadyAt ?? 0) - 200) {
+        f.dodgeUntil = now + R.dodge.ms;
+        f.dodgeReadyAt = now + R.dodge.cooldownMs;
+      }
+      // Accept the client's position only within top speed (with slack for network jitter). A
+      // roll is much faster, and its moves can arrive a little after it ends.
       if (input.l === f.life) {
-        const allowed = R.playerSpeed * ((now - f.lastMoveAt) / 1000) * 1.6 + 6;
+        const rolling = now < (f.dodgeUntil ?? 0) + 2 * R.tickMs;
+        const speed = rolling ? (R.dodge.distance / R.dodge.ms) * 1000 : R.playerSpeed;
+        const allowed = speed * ((now - f.lastMoveAt) / 1000) * 1.6 + 6;
         let dx = input.x - f.x;
         let dy = input.y - f.y;
         const d = Math.hypot(dx, dy);
@@ -318,8 +336,9 @@ export function createClashEngine() {
       f.lastMoveAt = now;
       const tapped = f.lastS >= 0 && input.s !== f.lastS;
       f.lastS = input.s;
-      f.firing = input.f;
-      if ((input.f || tapped) && now - f.lastShotAt >= R.fireCooldownMs) fire(ctx, state, f, out);
+      f.firing = input.f && !isRolling(now, f);
+      if ((f.firing || (tapped && !isRolling(now, f))) && now - f.lastShotAt >= R.fireCooldownMs)
+        fire(ctx, state, f, out);
     }
   };
 
@@ -336,7 +355,8 @@ export function createClashEngine() {
         }
         const owner = s.ownerId ? state.fighters.get(s.ownerId) : undefined;
         for (const f of state.fighters.values()) {
-          if (!f.alive || f.team === s.team) continue;
+          // A rolling player is dodging: the shot flies on past.
+          if (!f.alive || f.team === s.team || isRolling(now, f)) continue;
           if (dist2(s.x, s.y, f.x, f.y) > (R.playerRadius + R.shotRadius) ** 2) continue;
           // A spawn shield soaks up the shot.
           hurtFighter(ctx, state, f, s.damage, owner ?? null, out);
@@ -523,7 +543,8 @@ export function createClashEngine() {
         (f.alive ? CLASH_FLAG.alive : 0) |
           (f.alive && now < f.shieldUntil ? CLASH_FLAG.shield : 0) |
           (out.hurt.has(f.userId) ? CLASH_FLAG.hurt : 0) |
-          (f.firing ? CLASH_FLAG.firing : 0),
+          (f.firing ? CLASH_FLAG.firing : 0) |
+          (f.alive && now < (f.dodgeUntil ?? 0) ? CLASH_FLAG.dodge : 0),
         f.life,
         f.points,
         f.alive ? 0 : Math.max(0, Math.ceil((f.respawnAt - now) / 100)),

@@ -325,38 +325,100 @@ function flagTexture(team: number, color: string) {
 // ---------------------------------------------------------------------------------------------
 // Models
 
-const SKIN = ["#8d5a3b", "#c68a5a", "#5e3a24", "#e0b48c", "#a86e45"];
+const SKIN = ["#8d5a3b", "#c68a5a", "#5e3a24", "#e0b48c", "#a86e45", "#6b4129"];
+const PANTS = "#3b3f33";
+const GEAR = "#4b5137";
+const DARK = "#1d1e22";
 
-/** A soldier facing +x, about 60 units tall. Team-coloured parts are a separate mesh. */
+/** A rounded limb from one joint to another. */
+function limb(a: [number, number, number], b: [number, number, number], r: number) {
+  const from = new THREE.Vector3(...a);
+  const dir = new THREE.Vector3(...b).sub(from);
+  const g = new THREE.CapsuleGeometry(r, dir.length(), 3, 8);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize()));
+  g.translate(from.x + dir.x / 2, from.y + dir.y / 2, from.z + dir.z / 2);
+  return g;
+}
+
+/** Where the hips are. Legs hang from here, and a roll spins the soldier about this height. */
+const HIP = 29;
+const THIGH = 13;
+const SHIN = 11;
+
+/**
+ * A soldier facing +x, about 64 units tall, holding a rifle at the ready on their right (+z).
+ * Team-coloured clothes are a separate mesh, and the legs are jointed so they can walk and tuck.
+ */
 function soldierModel(n: number, team: number) {
   const skin = SKIN[n % SKIN.length]!;
+  const shoulderR: [number, number, number] = [0, 49, 9.5];
+  const shoulderL: [number, number, number] = [0, 49, -9.5];
+  const elbowR: [number, number, number] = [3, 40, 12];
+  const elbowL: [number, number, number] = [11, 41, -6];
+  const gripR: [number, number, number] = [10, 40.5, 4.5];
+  const gripL: [number, number, number] = [21, 43, 4];
   const body = bake([
-    [sphere(6.5), skin, [1, 53, 0]],
-    [box(4, 14, 16), "#3c4030", [8, 38, 0]],
-    [box(9, 15, 15), "#5a5a3e", [-11, 40, 0]],
-    [box(34, 4.5, 4), "#24252b", [17, 41, 7]],
-    [box(10, 7, 4.5), "#24252b", [4, 39, 7]],
-    [box(4, 8, 3.5), "#1b1c20", [14, 35, 7]],
-    [box(28, 3, 3), "#1b1c20", [21, 44, 7]],
+    // Head, face and neck.
+    [new THREE.CylinderGeometry(2.8, 3.2, 5, 8), skin, [0.5, 53.5, 0]],
+    [sphere(6, 14, 12), skin, [0.8, 59, 0], undefined, [1, 1.12, 0.92]],
+    [box(2, 2.6, 1.8), skin, [6.6, 58.4, 0], [0, 0, -0.2]],
+    [sphere(0.9, 6, 4), DARK, [5.7, 60, 2.2]],
+    [sphere(0.9, 6, 4), DARK, [5.7, 60, -2.2]],
+    [box(0.8, 0.7, 3), "#5a2e22", [6.2, 55.6, 0]],
+    [sphere(1.6, 6, 6), skin, [0.4, 58.5, 5.7], undefined, [0.6, 1, 0.5]],
+    [sphere(1.6, 6, 6), skin, [0.4, 58.5, -5.7], undefined, [0.6, 1, 0.5]],
+    // Hips, belt, chest rig and backpack.
+    [box(9, 8, 15), PANTS, [0, HIP + 2, 0]],
+    [box(10, 2.5, 16), DARK, [0, HIP + 6, 0]],
+    [box(3, 12, 13), GEAR, [6.4, 43, 0]],
+    [box(2.4, 4, 3.5), GEAR, [8.3, 39, 3.6]],
+    [box(2.4, 4, 3.5), GEAR, [8.3, 39, -3.6]],
+    [box(7, 15, 13), GEAR, [-8.6, 43, 0]],
+    [box(4, 4, 11), "#3e4330", [-8.6, 52, 0]],
+    // Gloved hands.
+    [sphere(2.5, 8, 6), DARK, gripR],
+    [sphere(2.5, 8, 6), DARK, gripL],
+    // The rifle.
+    [box(17, 4.5, 3.4), "#2a2b30", [14, 43.5, 4]],
+    [box(9, 4.5, 3), "#2a2b30", [1.5, 42.5, 4]],
+    [new THREE.CylinderGeometry(1.1, 1.1, 14, 6), DARK, [29, 44.3, 4], [0, 0, Math.PI / 2]],
+    [box(3.5, 8, 3), DARK, [15, 38, 4], [0, 0, 0.25]],
+    [box(4, 1.8, 2), DARK, [12, 46.6, 4]],
+    [box(3, 4, 2.6), DARK, [8.5, 39.5, 4], [0, 0, -0.3]],
   ]);
   const helmet =
     CLASH_TEAMS[team]?.shape === "square"
-      ? box(16, 7, 16).translate(0, 58.5, 0)
-      : new THREE.SphereGeometry(8.5, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 55, 0);
+      ? [
+          // A patrol cap with a peak.
+          box(12.5, 5, 12.5).translate(0.4, 63.2, 0),
+          box(5.5, 1.2, 10).translate(8.5, 61.4, 0),
+        ]
+      : [
+          // A round combat helmet.
+          new THREE.SphereGeometry(7.2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)
+            .scale(1.06, 0.95, 1)
+            .translate(0.6, 60.5, 0),
+          new THREE.CylinderGeometry(7.6, 7.8, 1.4, 16).translate(0.6, 60.6, 0),
+        ];
   const parts = [
-    box(13, 22, 21).translate(0, 37, 0),
-    helmet,
-    // Arms, reaching forward to the rifle.
-    box(17, 5, 5).translate(8, 42, -9),
-    box(15, 5, 5).translate(8, 41, 9),
+    // Jacket: a chest broader at the shoulders, with sleeves down to the gloves.
+    new THREE.CylinderGeometry(10, 7.6, 19, 12).scale(0.66, 1, 1).translate(0, 43, 0),
+    sphere(4.3).translate(...shoulderR),
+    sphere(4.3).translate(...shoulderL),
+    limb(shoulderR, elbowR, 3.2),
+    limb(elbowR, gripR, 2.8),
+    limb(shoulderL, elbowL, 3.2),
+    limb(elbowL, gripL, 2.8),
+    ...helmet,
   ];
   const kit = mergeGeometries(parts)!;
   for (const p of parts) p.dispose();
-  const leg = bake([
-    [box(7, 22, 7), "#3b3f33", [0, -11, 0]],
-    [box(10, 5, 8), "#1f1d1a", [1.5, -24, 0]],
+  const thigh = bake([[limb([0, 0, 0], [0, -THIGH, 0], 4.2), PANTS, [0, 0, 0]]]);
+  const shin = bake([
+    [limb([0, 0, 0], [0, -SHIN + 1, 0], 3.6), PANTS, [0, 0, 0]],
+    [box(10, 4.5, 6.5), DARK, [1.8, -SHIN - 1.5, 0]],
   ]);
-  return { body, kit, leg };
+  return { body, kit, thigh, shin };
 }
 
 function droneModel() {
@@ -620,37 +682,56 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   interface Soldier {
     team: number;
     root: THREE.Group;
+    /** Spins about the hips for a roll. */
+    roll: THREE.Group;
     body: THREE.Group;
     kit: THREE.Mesh;
-    legs: THREE.Mesh[];
+    thighs: THREE.Group[];
+    knees: THREE.Group[];
     muzzle: THREE.Sprite;
     shield: THREE.Mesh;
     geos: THREE.BufferGeometry[];
     last: { x: number; y: number };
+    vel: { x: number; y: number };
     speed: number;
     phase: number;
+    /** When the current roll started, and which way it goes. */
+    rollAt: number;
+    rollDir: { x: number; y: number };
   }
   const soldiers = new Map<number, Soldier>();
   const makeSoldier = (n: number, team: number): Soldier => {
     const m = soldierModel(n, team);
     const root = new THREE.Group();
+    const roll = new THREE.Group();
+    roll.position.y = HIP;
+    root.add(roll);
     const body = new THREE.Group();
-    root.add(body);
+    body.position.y = -HIP;
+    roll.add(body);
     body.add(new THREE.Mesh(m.body, colored));
     const kit = new THREE.Mesh(m.kit, teamMats[team] ?? teamMats[0]!);
     body.add(kit);
-    const legs = [-5.5, 5.5].map((z) => {
-      const leg = new THREE.Mesh(m.leg, colored);
-      leg.position.set(0, 26, z);
-      body.add(leg);
-      return leg;
-    });
+    const thighs: THREE.Group[] = [];
+    const knees: THREE.Group[] = [];
+    for (const z of [-4.6, 4.6]) {
+      const hip = new THREE.Group();
+      hip.position.set(0, HIP, z);
+      hip.add(new THREE.Mesh(m.thigh, colored));
+      const knee = new THREE.Group();
+      knee.position.y = -THIGH;
+      knee.add(new THREE.Mesh(m.shin, colored));
+      hip.add(knee);
+      body.add(hip);
+      thighs.push(hip);
+      knees.push(knee);
+    }
     const muzzle = new THREE.Sprite(glow);
-    muzzle.position.set(37, 43, 7);
-    muzzle.scale.setScalar(26);
+    muzzle.position.set(37, 44.3, 4);
+    muzzle.scale.setScalar(24);
     body.add(muzzle);
     const shadow = new THREE.Mesh(blobGeo, blob);
-    shadow.scale.set(48, 1, 48);
+    shadow.scale.set(46, 1, 46);
     shadow.position.y = 0.5;
     root.add(shadow);
     const shield = new THREE.Mesh(shieldGeo, shieldMat);
@@ -660,15 +741,20 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     return {
       team,
       root,
+      roll,
       body,
       kit,
-      legs,
+      thighs,
+      knees,
       muzzle,
       shield,
-      geos: [m.body, m.kit, m.leg],
+      geos: [m.body, m.kit, m.thigh, m.shin],
       last: { x: NaN, y: NaN },
+      vel: { x: 0, y: 0 },
       speed: 0,
       phase: 0,
+      rollAt: 0,
+      rollDir: { x: 1, y: 0 },
     };
   };
   const dropSoldier = (n: number) => {
@@ -722,6 +808,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   let camDist = 1;
   const v3 = new THREE.Vector3();
   const look = new THREE.Vector3();
+  const rollAxis = new THREE.Vector3();
 
   let lastT = 0;
   const render = (f: ClashFrame) => {
@@ -788,15 +875,53 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       s.root.position.set(p.x, 0, p.y);
       s.body.rotation.y = -p.a;
       // Legs swing with how fast the soldier is really moving.
-      const moved = Number.isNaN(s.last.x) || !dt ? 0 : Math.hypot(p.x - s.last.x, p.y - s.last.y) / dt;
+      const fresh = Number.isNaN(s.last.x) || !dt;
+      const vx = fresh ? 0 : (p.x - s.last.x) / dt;
+      const vy = fresh ? 0 : (p.y - s.last.y) / dt;
       s.last = { x: p.x, y: p.y };
-      s.speed += (Math.min(400, moved) - s.speed) * Math.min(1, dt * 10);
+      const ease = Math.min(1, dt * 10);
+      s.vel = { x: s.vel.x + (vx - s.vel.x) * ease, y: s.vel.y + (vy - s.vel.y) * ease };
+      s.speed = Math.min(400, Math.hypot(s.vel.x, s.vel.y));
       const stride = Math.min(1, s.speed / R.playerSpeed);
       s.phase += s.speed * dt * 0.075;
-      const swing = f.still ? 0 : Math.sin(s.phase) * 0.7 * stride;
-      s.legs[0]!.rotation.z = swing;
-      s.legs[1]!.rotation.z = -swing;
-      s.body.position.y = f.still ? 0 : Math.abs(Math.sin(s.phase)) * 2 * stride;
+      // Stepping backwards or sideways still reads as walking, so the legs cycle the same way.
+      const swing = f.still ? 0 : Math.sin(s.phase) * 0.62 * stride;
+      for (let i = 0; i < 2; i++) {
+        const side = i === 0 ? 1 : -1;
+        s.thighs[i]!.rotation.z = swing * side + 0.08;
+        // A knee bends as its leg comes forward, and stays a little soft at rest.
+        s.knees[i]!.rotation.z =
+          -0.16 - (f.still ? 0 : Math.max(0, Math.cos(s.phase + (i ? Math.PI : 0))) * 0.9 * stride);
+      }
+      s.body.position.y = -HIP + (f.still ? 0 : Math.abs(Math.sin(s.phase)) * 1.6 * stride);
+
+      // A dodge: a forward roll the way the soldier is moving, tucked up tight.
+      const rolling = !!(p.flags & CLASH_FLAG.dodge);
+      if (rolling && !s.rollAt) {
+        s.rollAt = f.t;
+        const len = Math.hypot(s.vel.x, s.vel.y);
+        s.rollDir = len > 40 ? { x: s.vel.x / len, y: s.vel.y / len } : { x: Math.cos(p.a), y: Math.sin(p.a) };
+      }
+      const k = s.rollAt ? (f.t - s.rollAt) / R.dodge.ms : 1;
+      if (s.rollAt && k >= 1 && !rolling) s.rollAt = 0;
+      if (s.rollAt && k < 1 && !f.still) {
+        const u = k * k * (3 - 2 * k);
+        rollAxis.set(s.rollDir.y, 0, -s.rollDir.x);
+        s.roll.quaternion.setFromAxisAngle(rollAxis, u * Math.PI * 2);
+        // Lower to the ground and tuck the legs in through the middle of the roll.
+        const tuck = Math.sin(k * Math.PI);
+        s.roll.position.y = HIP - tuck * 8;
+        // Curled into a ball, so the head clears the ground as it goes over.
+        s.roll.scale.setScalar(1 - tuck * 0.3);
+        for (let i = 0; i < 2; i++) {
+          s.thighs[i]!.rotation.z = 1.5 * tuck;
+          s.knees[i]!.rotation.z = -2.2 * tuck;
+        }
+      } else {
+        s.roll.quaternion.identity();
+        s.roll.position.y = HIP;
+        s.roll.scale.setScalar(1);
+      }
       s.kit.material = p.flags & CLASH_FLAG.hurt ? flash : (teamMats[p.team] ?? teamMats[0]!);
       s.shield.visible = !!(p.flags & CLASH_FLAG.shield);
       s.muzzle.visible = !!(p.flags & CLASH_FLAG.firing) && Math.floor(f.t / 45) % 2 === 0;
