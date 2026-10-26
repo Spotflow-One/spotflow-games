@@ -1,0 +1,7 @@
+dist
+node_modules
+apps/server/drizzle
+apps/web/src/styles/tokens.css
+apps/web/src/styles/components.css
+design-system
+package-lock.json
