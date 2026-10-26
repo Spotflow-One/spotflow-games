@@ -52,13 +52,21 @@ const INTERP_MIN_MS = 150;
 const INTERP_MAX_MS = 600;
 /** Past the newest snapshot, cars keep moving on their last speed and heading for up to this long. */
 const EXTRAPOLATE_MS = 350;
-/** How far back we remember our own car, to match against the server's slightly old view of it. */
-const HISTORY_MS = 1200;
+/**
+ * How far back we remember our own car, to match against the server's view of it, which on a
+ * slow or stalling connection can be a couple of seconds old.
+ */
+const HISTORY_MS = 4000;
 /** Send the car's position this often while it moves, and at least this often while it doesn't. */
 const SEND_EVERY_MS = 100;
 const HEARTBEAT_MS = 400;
-/** Snap to the server's position when prediction drifts further than this. */
+/**
+ * Snap to the server's position only when it stays further than this from anywhere we have
+ * recently been, for this long. After a network stall the server is behind for a moment and
+ * catches up on its own, and pulling the car back then feels like it lurched backwards.
+ */
 const SNAP_DIST = 160;
+const SNAP_AFTER_MS = 1500;
 /** Displayed speed: units per second to km/h. */
 const KMH = 0.3;
 
@@ -177,7 +185,7 @@ export function RaceScreen({ session, game, meId }: Props) {
   const arrivals = useRef<number[]>([]);
   const trail = useRef<{ t: number; x: number; y: number }[]>([]);
   const car = useRef<CarState | null>(null);
-  const meInfo = useRef({ k: -1, item: 0, finished: false, progress: -1, lapShown: 1 });
+  const meInfo = useRef({ k: -1, item: 0, finished: false, progress: -1, lapShown: 1, driftSince: 0 });
   const particles = useRef<Particle[]>([]);
   const controls = useRef({
     keys: new Set<string>(),
@@ -214,10 +222,14 @@ export function RaceScreen({ session, game, meId }: Props) {
       const m = meInfo.current;
       if (mine) {
         const c = car.current;
-        // A new placement, or the server disagreeing a lot, puts us where the server says. The
-        // server's view is from a moment ago, so it is matched against where we have recently been.
-        if (!c || mine[8] !== m.k || driftFrom(trail.current, c, mine[1], mine[2]) > SNAP_DIST) {
+        // A new placement, or the server disagreeing for a while, puts us where the server says.
+        // The server's view is from a moment ago, so it is matched against where we have been.
+        const off = !!c && driftFrom(trail.current, c, mine[1], mine[2]) > SNAP_DIST;
+        if (!off) m.driftSince = 0;
+        else m.driftSince ||= recv;
+        if (!c || mine[8] !== m.k || (off && recv - m.driftSince > SNAP_AFTER_MS)) {
           const fresh = newCar(mine[1], mine[2], mine[3] / 100);
+          m.driftSince = 0;
           trail.current = [];
           if (c && mine[8] === m.k) {
             fresh.v = c.v;
