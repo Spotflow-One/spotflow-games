@@ -3,7 +3,13 @@ import { runMigrations } from "./db/migrate.js";
 import { buildApp } from "./app.js";
 
 const config = loadConfig();
-await runMigrations(config.DATABASE_URL);
+console.info("Running database migrations…");
+await runMigrations(config.DATABASE_URL).catch((err: Error) => {
+  console.error(
+    `Could not reach or migrate the database at DATABASE_URL: ${(err.cause as Error | undefined)?.message ?? err.message}`,
+  );
+  throw err;
+});
 const { app, manager } = await buildApp(config);
 await manager.recoverOnBoot();
 manager.startSweeper();

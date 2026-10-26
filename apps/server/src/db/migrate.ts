@@ -18,9 +18,3 @@ export async function runMigrations(databaseUrl: string, folder = migrationsFold
     await pool.end();
   }
 }
-
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const url = process.env.DATABASE_URL ?? "postgres://spotflow:spotflow@localhost:5432/spotflow_games";
-  await runMigrations(url);
-  console.log("Migrations applied");
-}
