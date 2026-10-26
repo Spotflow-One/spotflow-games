@@ -9,6 +9,8 @@ export function TokyoRun() {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
+    // Pages behind the backdrop go see-through while it's showing.
+    document.documentElement.dataset.backdrop = "tokyo";
     const canvas = ref.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
@@ -140,6 +142,7 @@ export function TokyoRun() {
     window.addEventListener("resize", onResize);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      delete document.documentElement.dataset.backdrop;
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);

@@ -4,6 +4,7 @@ import { GAME_INFO, sessionCodeSchema, type GameType, type SessionSummary } from
 import { Play } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useMusic } from "../lib/music";
 import { GameIcon } from "../components/GameIcon";
 import { TokyoRun } from "../components/TokyoRun";
 
@@ -28,6 +29,7 @@ export function Home() {
   const [lobbies, setLobbies] = useState<SessionSummary[]>([]);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
+  useMusic("arcade");
 
   useEffect(() => {
     api<GameListing[]>("/api/games").then(setGames, () => {});

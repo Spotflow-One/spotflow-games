@@ -24,11 +24,13 @@ import {
   type TruthsView,
 } from "@spotflow-games/shared";
 import { useAuth } from "../lib/auth";
+import { useMusic } from "../lib/music";
 import { usePreferences } from "../lib/preferences";
 import { getSocket, request } from "../lib/socket";
 import { playSound } from "../lib/sound";
 import { Avatar } from "../components/Avatar";
 import { HowYouAppear } from "../components/HowYouAppear";
+import { TokyoRun } from "../components/TokyoRun";
 import { GameIcon } from "../components/GameIcon";
 import { Confetti } from "../components/Confetti";
 import { rankedPlayers } from "../components/Standings";
@@ -50,6 +52,7 @@ export function Session() {
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const prevStatus = useRef<string | null>(null);
+  useMusic(view?.status === "results" || view?.status === "completed" ? "victory" : null);
 
   useEffect(() => {
     const socket = getSocket();
@@ -87,6 +90,8 @@ export function Session() {
   useEffect(() => {
     if (!view) return;
     if (prevStatus.current && prevStatus.current !== view.status) {
+      // Each stage of the game starts at the top of the page, not wherever the lobby was scrolled to.
+      window.scrollTo({ top: 0 });
       if (view.status === "in_progress") playSound("countdown", soundEnabled);
       if (view.status === "results") {
         const top = Math.max(...view.participants.map((p) => p.score));
@@ -227,6 +232,12 @@ export function Session() {
           )}
         </div>
       )}
+      {inLobby && (
+        <>
+          <TokyoRun />
+          <div className="race-lane" aria-hidden="true" />
+        </>
+      )}
 
       {notice && (
         <div className="sg-banner danger" role="alert">
@@ -273,7 +284,7 @@ export function Session() {
             <Roster view={view} meId={me.id} isHost={isHost} act={act} />
           </details>
         ) : (
-          <section className="sg-stack" aria-labelledby="players-heading">
+          <section className="sg-card sg-stack lobby-panel" aria-labelledby="players-heading">
             <div className="sg-row">
               <h2 id="players-heading" className="sg-h3">
                 Players
@@ -295,23 +306,23 @@ export function Session() {
               </span>
             </div>
             <Roster view={view} meId={me.id} isHost={isHost} act={act} />
+            {isHost && inLobby && <HostControls view={view} act={act} />}
+            {!isHost && inLobby && (
+              <div className="sg-row" style={{ justifyContent: "center" }}>
+                <button
+                  className="sg-btn ghost"
+                  onClick={async () => {
+                    await act("session:leave");
+                    navigate("/");
+                  }}
+                >
+                  Leave session
+                </button>
+              </div>
+            )}
           </section>
         ))}
 
-      {isHost && inLobby && <HostControls view={view} act={act} />}
-      {!isHost && inLobby && (
-        <div className="sg-row" style={{ justifyContent: "center" }}>
-          <button
-            className="sg-btn ghost"
-            onClick={async () => {
-              await act("session:leave");
-              navigate("/");
-            }}
-          >
-            Leave session
-          </button>
-        </div>
-      )}
       {(finished || view.status === "cancelled") && (
         <div className="sg-row" style={{ justifyContent: "center" }}>
           <Link className="sg-btn lg" to="/">
