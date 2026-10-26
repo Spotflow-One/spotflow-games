@@ -23,6 +23,7 @@ import {
   type TruthsView,
 } from "@spotflow-games/shared";
 import { useAuth } from "../lib/auth";
+import { useMusic } from "../lib/music";
 import { usePreferences } from "../lib/preferences";
 import { getSocket, request } from "../lib/socket";
 import { playSound } from "../lib/sound";
@@ -46,6 +47,7 @@ export function Session() {
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const prevStatus = useRef<string | null>(null);
+  useMusic(view?.status === "results" || view?.status === "completed" ? "victory" : null);
 
   useEffect(() => {
     const socket = getSocket();

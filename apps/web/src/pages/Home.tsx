@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { GAME_INFO, sessionCodeSchema, type GameType, type SessionSummary } from "@spotflow-games/shared";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useMusic } from "../lib/music";
 import { GameIcon } from "../components/GameIcon";
 
 interface GameListing {
@@ -25,6 +26,7 @@ export function Home() {
   const [lobbies, setLobbies] = useState<SessionSummary[]>([]);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
+  useMusic("arcade");
 
   useEffect(() => {
     api<GameListing[]>("/api/games").then(setGames, () => {});
