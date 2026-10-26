@@ -1,4 +1,4 @@
-# Spotflow Games
+# Happy Hour (spotflow-games)
 
 Internal multiplayer games for the Spotflow team: Quiz Arena, Draw & Guess, and Two Truths and a Lie. Sign-in is limited to verified `spotflow.one` Google accounts.
 

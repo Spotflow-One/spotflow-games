@@ -4,6 +4,7 @@ import type { QuizView, SessionView } from "@spotflow-games/shared";
 import { usePreferences } from "../lib/preferences";
 import { request } from "../lib/socket";
 import { playSound } from "../lib/sound";
+import { Standings } from "../components/Standings";
 import { Timer, useCountdown } from "../components/Timer";
 
 /** Fixed shape, colour and number per position, so answers never depend on colour alone. */
@@ -54,14 +55,13 @@ export function QuizScreen({ session, game, meId, onError }: Props) {
   }, [canAnswer, game.question]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (game.phase === "countdown") {
+    const n = Math.max(1, Math.ceil(seconds));
     return (
-      <div
-        className="sg-card sg-stack"
-        style={{ alignItems: "center", textAlign: "center", padding: "var(--space-12)" }}
-      >
+      <div className="get-ready quiz">
         <span className="sg-eyebrow">{game.title}</span>
-        <p className="quiz-countdown" aria-live="assertive">
-          {Math.max(1, Math.ceil(seconds))}
+        <h2 className="display-xl">Get ready!</h2>
+        <p key={n} className="get-ready-count" aria-live="assertive">
+          {n}
         </p>
         <p className="sg-muted" style={{ margin: 0 }}>
           {game.totalQuestions} questions. Answer fast: quicker right answers score more.
@@ -73,16 +73,17 @@ export function QuizScreen({ session, game, meId, onError }: Props) {
   const question = game.question!;
   const reveal = game.reveal;
   const correctText = reveal ? question.options[reveal.correctIndex] : "";
+  const right = reveal ? reveal.myPoints > 0 : false;
 
   return (
-    <div className="sg-stack" style={{ gap: "var(--space-6)" }}>
+    <div className="sg-stack" style={{ gap: "var(--space-5)" }}>
       <div className="sg-row" style={{ justifyContent: "space-between" }}>
         <div className="sg-stack" style={{ gap: "var(--space-2)", flex: 1, minWidth: 200, maxWidth: 360 }}>
           <span className="sg-eyebrow">
             Question {game.questionNumber} of {game.totalQuestions}
           </span>
           <div
-            className="sg-progress"
+            className="sg-progress quiz"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={game.totalQuestions}
@@ -93,45 +94,53 @@ export function QuizScreen({ session, game, meId, onError }: Props) {
           </div>
         </div>
         {game.isPlayer && me && (
-          <span className="sg-score sg-num">
+          <span className="sg-score sg-num big-score">
             {me.score.toLocaleString()}
-            {reveal && reveal.myPoints > 0 && <span className="plus">+{reveal.myPoints}</span>}
+            {reveal && reveal.myPoints > 0 && (
+              <span key={game.questionNumber} className="plus float-up">
+                +{reveal.myPoints}
+              </span>
+            )}
           </span>
         )}
       </div>
 
-      <div className="sg-row" style={{ gap: "var(--space-6)", alignItems: "center", flexWrap: "nowrap" }}>
+      <div className="question-card">
         {game.phase === "question" && <Timer seconds={seconds} total={game.timeLimitSec} game="quiz" />}
-        <h2 className="sg-h1 quiz-prompt" style={{ flex: 1, minWidth: 0 }}>
-          {question.prompt}
-        </h2>
+        <h2 className="quiz-prompt">{question.prompt}</h2>
       </div>
 
       {reveal && game.isPlayer && (
-        <div className={`sg-banner ${reveal.myPoints > 0 ? "success" : "danger"}`} role="status">
-          <span className="ic">
-            {reveal.myPoints > 0 ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}
-          </span>
-          <span>
-            {reveal.myPoints > 0 ? (
-              <>
-                <b>Correct!</b> +{reveal.myPoints} points
-                {reveal.myAnswerMs !== null && `, ${(reveal.myAnswerMs / 1000).toFixed(1)} seconds`}
-              </>
-            ) : game.myAnswer === null ? (
-              <>
-                <b>Out of time.</b> The answer was {correctText}.
-              </>
-            ) : (
-              <>
-                <b>Not quite.</b> The answer was {correctText}.
-              </>
-            )}
+        <div className={`reveal-burst ${right ? "right" : "miss"}`} role="status">
+          {right ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}
+          <div>
+            <b>{right ? "Correct!" : game.myAnswer === null ? "Out of time" : "Not quite"}</b>
+            <span>
+              {right
+                ? `+${reveal.myPoints} points${reveal.myAnswerMs !== null ? ` · ${(reveal.myAnswerMs / 1000).toFixed(1)} seconds` : ""}`
+                : `The answer was ${correctText}.`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {game.phase === "question" && game.isPlayer && game.myAnswer !== null && (
+        <div className="locked-in" role="status">
+          <Check aria-hidden="true" size={18} />
+          Answer locked in. Waiting for everyone else
+          <span className="dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
           </span>
         </div>
       )}
 
-      <div className="sg-answers" role="group" aria-label="Answers">
+      <div
+        className={`sg-answers buzzers${reveal ? " revealed" : ""}${game.myAnswer !== null ? " answered" : ""}`}
+        role="group"
+        aria-label="Answers"
+      >
         {question.options.map((option, i) => {
           const selected = game.myAnswer === i;
           let state = "";
@@ -141,7 +150,7 @@ export function QuizScreen({ session, game, meId, onError }: Props) {
           return (
             <button
               key={i}
-              className={`sg-answer${i ? ` a${i + 1}` : ""} ${state}`}
+              className={`sg-answer buzzer${i ? ` a${i + 1}` : ""} ${state}`}
               disabled={!canAnswer}
               aria-pressed={selected}
               aria-label={`${SHAPE_NAMES[i]} ${i + 1}: ${option}${state === "correct" ? ", correct answer" : ""}${selected ? ", your answer" : ""}`}
@@ -187,7 +196,6 @@ export function QuizScreen({ session, game, meId, onError }: Props) {
           {game.phase === "question"
             ? `${game.answeredCount} of ${game.playerCount} have answered`
             : `${game.answeredCount} of ${game.playerCount} answered`}
-          {game.phase === "question" && game.myAnswer !== null && " · Answer locked in"}
         </span>
         {isHost && (
           <button className="sg-btn secondary" onClick={() => send({ type: "next" })}>
@@ -200,6 +208,8 @@ export function QuizScreen({ session, game, meId, onError }: Props) {
           </button>
         )}
       </div>
+
+      {reveal && <Standings view={session} meId={meId} gained={{ [meId]: reveal.myPoints }} />}
     </div>
   );
 }

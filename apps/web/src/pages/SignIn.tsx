@@ -3,6 +3,7 @@ import { Navigate, useSearchParams } from "react-router";
 import { TriangleAlert } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { Wordmark } from "../components/Wordmark";
 
 const ERRORS: Record<string, string> = {
   wrong_domain: "Only Spotflow Google accounts can sign in. Switch to your spotflow.one account and try again.",
@@ -32,8 +33,7 @@ export function SignIn() {
     <div className="center-page">
       <div className="sg-card sg-stack signin-card">
         <span className="sg-wordmark">
-          <img className="sg-logo" src="/spotflow-mark.png" alt="" width="24" height="22" />
-          Spotflow <em>Games</em>
+          <Wordmark />
         </span>
         <h1 className="sg-h2">Game night with the team</h1>
         <p className="sg-muted" style={{ margin: 0 }}>
