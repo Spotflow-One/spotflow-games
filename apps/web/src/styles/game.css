@@ -574,7 +574,7 @@
 }
 @media (max-width: 799px) {
   .home-hero {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     padding: var(--space-5);
     gap: var(--space-5);
   }
@@ -707,4 +707,125 @@ a.sg-btn {
 .you-card {
   border-radius: var(--radius-xl);
   border-left: 6px solid var(--g);
+}
+
+/* Arcade backdrop on the home page: night sky, stars, a neon horizon, a moving grid floor and drifting shapes.
+   It looks the same in both themes, so only arcade-* tokens touch it, and the cards on top keep their theme. */
+:root[data-page="home"] body {
+  background: var(--arcade-sky-deep);
+}
+:root[data-page="home"] .sg-screen {
+  background: transparent;
+}
+:root[data-page="home"] .app-main {
+  position: relative;
+  z-index: 1;
+}
+.arcade-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  contain: paint;
+  pointer-events: none;
+}
+.arcade-stars {
+  position: absolute;
+  inset: 0 0 40% 0;
+  background:
+    radial-gradient(circle at 12% 18%, var(--arcade-ink) 1px, transparent 2px),
+    radial-gradient(circle at 27% 42%, var(--arcade-ink) 1px, transparent 2px),
+    radial-gradient(circle at 63% 12%, var(--arcade-ink) 1.5px, transparent 2.5px),
+    radial-gradient(circle at 78% 33%, var(--arcade-ink) 1px, transparent 2px),
+    radial-gradient(circle at 91% 8%, var(--arcade-ink) 1px, transparent 2px),
+    radial-gradient(circle at 44% 27%, var(--arcade-ink) 1px, transparent 2px),
+    radial-gradient(circle at 5% 55%, var(--arcade-ink) 1px, transparent 2px),
+    radial-gradient(circle at 70% 60%, var(--arcade-ink) 1px, transparent 2px);
+  opacity: 0.7;
+  animation: twinkle 3s ease-in-out infinite;
+}
+@keyframes twinkle {
+  50% {
+    opacity: 0.35;
+  }
+}
+.arcade-sun {
+  position: absolute;
+  left: 50%;
+  bottom: 34%;
+  width: 360px;
+  height: 180px;
+  transform: translateX(-50%);
+  border-radius: 360px 360px 0 0;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 18px, var(--arcade-sky-deep) 18px 24px),
+    linear-gradient(180deg, var(--arcade-grid), var(--arcade-glow));
+  opacity: 0.55;
+  filter: blur(0.5px);
+}
+.arcade-floor {
+  position: absolute;
+  left: -50%;
+  right: -50%;
+  bottom: 0;
+  height: 34%;
+  border-top: 2px solid var(--arcade-glow);
+  box-shadow: 0 -8px 40px var(--arcade-glow);
+  background-image:
+    linear-gradient(var(--arcade-grid) 2px, transparent 2px),
+    linear-gradient(90deg, var(--arcade-grid) 2px, transparent 2px);
+  background-size: 64px 64px;
+  transform: perspective(260px) rotateX(55deg);
+  transform-origin: top center;
+  opacity: 0.6;
+  animation: floor-scroll 1.6s linear infinite;
+}
+@keyframes floor-scroll {
+  to {
+    background-position: 0 64px;
+  }
+}
+.arcade-floater {
+  position: absolute;
+  fill: none;
+  stroke: var(--arcade-glow);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px var(--arcade-glow));
+  opacity: 0.7;
+  animation: drift 6s ease-in-out infinite;
+}
+.arcade-floater.dia,
+.arcade-floater.sq {
+  stroke: var(--arcade-grid);
+  filter: drop-shadow(0 0 6px var(--arcade-grid));
+}
+@keyframes drift {
+  50% {
+    transform: translateY(-14px) rotate(12deg);
+  }
+}
+.arcade-title {
+  color: var(--arcade-ink);
+}
+:root[data-page="home"] .home-hero {
+  box-shadow:
+    0 0 0 2px var(--arcade-grid),
+    0 0 32px var(--arcade-grid);
+}
+:root[data-page="home"] .sg-game.arcade:hover {
+  box-shadow:
+    0 0 0 2px var(--arcade-glow),
+    0 0 28px var(--arcade-glow);
+}
+@media (max-width: 599px) {
+  .arcade-sun {
+    width: 220px;
+    height: 110px;
+  }
+  .arcade-floater {
+    opacity: 0.45;
+  }
+}
+.app-main {
+  grid-template-columns: minmax(0, 1fr);
 }
