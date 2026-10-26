@@ -58,7 +58,7 @@ export function HowYouAppear({
     return (
       <section className="sg-card sg-row you-card" aria-label="How you appear in this game">
         <Avatar avatar={me.avatar} name={you?.displayName ?? me.displayName} userId={me.id} />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 160 }}>
           <div className="nm">
             <b>{you?.displayName ?? me.displayName}</b>
           </div>
