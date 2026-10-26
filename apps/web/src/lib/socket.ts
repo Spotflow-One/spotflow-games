@@ -5,9 +5,13 @@ export type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 let socket: GameSocket | null = null;
 
-/** One shared connection per tab. The session cookie authenticates it. */
+/**
+ * One shared connection per tab. The session cookie authenticates it.
+ * WebSocket only: long-polling sends each request separately, so on a host with several
+ * instances the requests could land on different ones.
+ */
 export function getSocket(): GameSocket {
-  if (!socket) socket = io({ transports: ["websocket", "polling"], withCredentials: true });
+  if (!socket) socket = io({ transports: ["websocket"], withCredentials: true });
   return socket;
 }
 
