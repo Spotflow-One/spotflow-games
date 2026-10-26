@@ -84,3 +84,13 @@ Edit `apps/server/src/db/schema.ts`, then run `npm run db:generate` and commit t
 The `Dockerfile` builds one image that serves the API, WebSockets and the web app on `PORT` (8080 by default). Required in production: `DATABASE_URL`, `APP_URL`, `COOKIE_SECRET`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
 
 Live sessions are kept in memory on one instance, so run a single replica, or use sticky sessions, until the sessions get a shared store. One instance handles the launch target of 100 concurrent players. If the process restarts, games in progress are cancelled, and completed results are already saved.
+
+### Vercel
+
+`vercel.json` deploys the same image as one Vercel service (`app`, Container runtime) that takes all public traffic. Nothing calls another service server-side, so there are no bindings. In the Vercel project:
+
+- Set `PORT=8080` (Vercel sends traffic to port 80 unless `PORT` is set, and the image runs as a non-root user that can't bind 80).
+- Set the production variables above, marking `DATABASE_URL`, `COOKIE_SECRET` and `GOOGLE_CLIENT_SECRET` as Sensitive.
+- Make sure Fluid Compute is on (Settings → Functions); WebSockets need it.
+
+Caveats while live sessions stay in memory: Vercel can run several instances, and a player on a different instance from the host won't find the session. Vercel also closes WebSocket connections at the function's maximum duration (300 seconds by default), so clients reconnect every few minutes and may land on another instance.
