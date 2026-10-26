@@ -13,6 +13,7 @@ import { SignIn } from "./pages/SignIn";
 import "./styles/tokens.css";
 import "./styles/components.css";
 import "./styles/app.css";
+import "./styles/game.css";
 
 /** Every page except sign-in needs a Spotflow account, including invitation links. */
 function RequireAuth({ children }: { children: ReactNode }) {

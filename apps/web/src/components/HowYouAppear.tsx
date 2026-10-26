@@ -56,7 +56,7 @@ export function HowYouAppear({
 
   if (!open) {
     return (
-      <section className="sg-card sg-row" aria-label="How you appear in this game">
+      <section className="sg-card sg-row you-card" aria-label="How you appear in this game">
         <Avatar avatar={me.avatar} name={you?.displayName ?? me.displayName} userId={me.id} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="nm">
@@ -72,7 +72,7 @@ export function HowYouAppear({
     );
   }
   return (
-    <form className="sg-card sg-stack" aria-labelledby="appear-heading" onSubmit={save}>
+    <form className="sg-card sg-stack you-card" aria-labelledby="appear-heading" onSubmit={save}>
       <h2 id="appear-heading" className="sg-h3">
         How you'll appear
       </h2>
