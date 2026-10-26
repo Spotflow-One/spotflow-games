@@ -25,10 +25,21 @@ body,
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: var(--space-6);
 }
+/* Game cards: one column on phones, two on tablets, three per row on desktop. */
 .games {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: 1fr;
   gap: var(--space-4);
+}
+@media (min-width: 600px) {
+  .games {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 960px) {
+  .games {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 .sg-game[aria-pressed="true"] {
   outline: 3px solid var(--g);
