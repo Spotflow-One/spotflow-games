@@ -709,15 +709,15 @@ a.sg-btn {
   border-left: 6px solid var(--g);
 }
 
-/* Home page backdrop: a flying car racing through neon Tokyo (components/TokyoRun.tsx).
+/* Flyer backdrop on the home page and game lobbies: a flying car racing through neon Tokyo (components/TokyoRun.tsx).
    It looks the same in both themes, so only arcade-* tokens touch it, and the cards on top keep their theme. */
-:root[data-page="home"] body {
+:root[data-backdrop="tokyo"] body {
   background: var(--arcade-sky-deep);
 }
-:root[data-page="home"] .sg-screen {
+:root[data-backdrop="tokyo"] .sg-screen {
   background: transparent;
 }
-:root[data-page="home"] .app-main {
+:root[data-backdrop="tokyo"] .app-main {
   position: relative;
   z-index: 1;
 }
@@ -747,7 +747,7 @@ a.sg-btn {
 .app-main {
   grid-template-columns: minmax(0, 1fr);
 }
-:root[data-page="home"] .app-appbar {
+:root[data-backdrop="tokyo"] .app-appbar {
   position: relative;
   z-index: 2;
 }
@@ -755,4 +755,10 @@ a.sg-btn {
 .race-lane {
   height: clamp(110px, 18vh, 190px);
   margin: calc(var(--space-6) * -1) 0;
+}
+:root[data-backdrop="tokyo"] .lobby-hero,
+:root[data-backdrop="tokyo"] .lobby-panel {
+  box-shadow:
+    0 0 0 2px var(--g),
+    0 0 32px var(--g);
 }
