@@ -7,3 +7,4 @@ export * from "./quiz.js";
 export * from "./draw.js";
 export * from "./truths.js";
 export * from "./clash.js";
+export * from "./race.js";

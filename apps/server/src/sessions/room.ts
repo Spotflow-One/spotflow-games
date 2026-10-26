@@ -222,7 +222,10 @@ export class Room {
     }
     if (!this.isLive) throw new GameError("This session has ended");
     if (this.status === "in_progress" && !this.allowLateJoin) throw new GameError("This game has already started");
-    if (this.participants.size >= maxPlayers) throw new GameError("This session is full");
+    // A game can cap its players below the session limit; a host who only watches doesn't count.
+    const gameCap = this.engine?.maxPlayers;
+    const cap = gameCap === undefined ? maxPlayers : Math.min(maxPlayers, gameCap + (this.hostPlays ? 0 : 1));
+    if (this.participants.size >= cap) throw new GameError("This session is full");
     this.participants.set(user.id, {
       userId: user.id,
       displayName: alias || user.displayName,

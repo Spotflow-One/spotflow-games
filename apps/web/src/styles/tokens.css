@@ -33,6 +33,10 @@
   --clash-team-2: #1fb36b;
   --clash-team-3: #f2b300;
   --on-clash-team: #0d0b1f;
+  --game-race: #f5b400;
+  --game-race-soft: #fff2c7;
+  --game-race-ink: #7a5200;
+  --on-game-race: #241800;
   --success: #0a7488;
   --success-soft: #d5f0f4;
   --danger: #c42b2b;
@@ -142,6 +146,10 @@
   --clash-team-2: #3fd08b;
   --clash-team-3: #ffc53d;
   --on-clash-team: #0d0b1f;
+  --game-race: #ffc93d;
+  --game-race-soft: #3a2a00;
+  --game-race-ink: #ffd877;
+  --on-game-race: #241800;
   --success: #56c8da;
   --success-soft: #0d3138;
   --danger: #ff7d74;
@@ -225,6 +233,10 @@
     --clash-team-2: #3fd08b;
     --clash-team-3: #ffc53d;
     --on-clash-team: #0d0b1f;
+    --game-race: #ffc93d;
+    --game-race-soft: #3a2a00;
+    --game-race-ink: #ffd877;
+    --on-game-race: #241800;
     --success: #56c8da;
     --success-soft: #0d3138;
     --danger: #ff7d74;

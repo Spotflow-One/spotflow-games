@@ -70,6 +70,8 @@ export interface GameEngine<Config = unknown, State = unknown> {
   readonly type: GameType;
   readonly rulesVersion: number;
   readonly minPlayers: number;
+  /** Most players the game takes, if fewer than the session limit. */
+  readonly maxPlayers?: number;
   /**
    * Validate host settings and resolve any content (e.g. load the quiz) into a snapshot,
    * so later edits to the content cannot change a running session. Throw GameError on bad input.

@@ -15,6 +15,13 @@
       "when": 1793035756454,
       "tag": "0001_clash",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793038837845,
+      "tag": "0002_race",
+      "breakpoints": true
     }
   ]
 }

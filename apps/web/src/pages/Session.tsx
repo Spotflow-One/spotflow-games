@@ -20,6 +20,7 @@ import {
   type DrawView,
   type ParticipantView,
   type QuizView,
+  type RaceView,
   type SessionView,
   type TruthsView,
 } from "@spotflow-games/shared";
@@ -37,6 +38,7 @@ import { rankedPlayers } from "../components/Standings";
 import { ClashOutcome, ClashScreen } from "../games/ClashScreen";
 import { DrawScreen } from "../games/DrawScreen";
 import { QuizScreen } from "../games/QuizScreen";
+import { RaceOutcome, RaceScreen } from "../games/RaceScreen";
 import { TruthsScreen } from "../games/TruthsScreen";
 
 type Conn = "connecting" | "connected" | "reconnecting";
@@ -258,8 +260,15 @@ export function Session() {
         <ClashScreen session={view} game={view.game as ClashView} meId={me.id} />
       )}
 
+      {playing && view.game !== null && view.gameType === "race" && (
+        <RaceScreen session={view} game={view.game as RaceView} meId={me.id} />
+      )}
+
       {finished && view.game !== null && view.gameType === "clash" && (
         <ClashOutcome session={view} game={view.game as ClashView} meId={me.id} />
+      )}
+      {finished && view.game !== null && view.gameType === "race" && (
+        <RaceOutcome session={view} game={view.game as RaceView} meId={me.id} />
       )}
       {finished && <Results view={view} meId={me.id} />}
 
@@ -291,7 +300,7 @@ export function Session() {
               </h2>
               <span className="sg-badge neutral">
                 <Users aria-hidden="true" size={16} />
-                {view.participants.length} of {MAX_PLAYERS_PER_SESSION}
+                {view.participants.length} of {info.maxPlayers ?? MAX_PLAYERS_PER_SESSION}
               </span>
               <span style={{ flex: 1 }} />
               <span className={`sg-muted${inLobby ? " waiting" : ""}`}>

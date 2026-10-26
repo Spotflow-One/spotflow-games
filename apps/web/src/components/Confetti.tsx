@@ -1,4 +1,4 @@
-const COLORS = ["quiz", "draw", "truths", "clash", "primary", "gold"] as const;
+const COLORS = ["quiz", "draw", "truths", "clash", "race", "primary", "gold"] as const;
 const PIECES = Array.from({ length: 40 }, (_, i) => ({
   // Spread pieces evenly with a little deterministic jitter, so renders are stable.
   left: ((i * 37) % 100) + ((i * 7) % 5) / 5,

@@ -20,6 +20,7 @@ const DESCRIPTIONS: Record<GameType, string> = {
   draw: "One player draws, everyone else races to guess the word.",
   truths: "Featured players share three statements. Spot the lie.",
   clash: "Split into teams, take down drones and the Titan, and outgun the other side.",
+  race: "Race up to 30 drivers through Lagos traffic and over Third Mainland Bridge. Mind the danfos.",
 };
 
 export function Home() {
