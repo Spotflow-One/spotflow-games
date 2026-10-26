@@ -18,6 +18,8 @@ import {
   RACE_RULES as R,
   RACE_TRACK as T,
   buildCourse,
+  clampToWalls,
+  locate,
   mulberry32,
   moversAt,
   newCar,
@@ -41,8 +43,17 @@ interface Props {
   meId: string;
 }
 
-/** Others are drawn this far in the past, so there are always two snapshots to blend between. */
-const INTERP_MS = 150;
+/**
+ * Others are drawn a little in the past, so there are two snapshots to blend between. The delay
+ * follows how often snapshots actually arrive, which on a busy server or network is slower and
+ * less even than the tick.
+ */
+const INTERP_MIN_MS = 150;
+const INTERP_MAX_MS = 600;
+/** Past the newest snapshot, cars keep moving on their last speed and heading for up to this long. */
+const EXTRAPOLATE_MS = 350;
+/** How far back we remember our own car, to match against the server's slightly old view of it. */
+const HISTORY_MS = 1200;
 /** Send the car's position this often while it moves, and at least this often while it doesn't. */
 const SEND_EVERY_MS = 100;
 const HEARTBEAT_MS = 400;
@@ -163,6 +174,8 @@ export function RaceScreen({ session, game, meId }: Props) {
 
   const snaps = useRef<RaceSnapshot[]>([]);
   const offsets = useRef<number[]>([]);
+  const arrivals = useRef<number[]>([]);
+  const trail = useRef<{ t: number; x: number; y: number }[]>([]);
   const car = useRef<CarState | null>(null);
   const meInfo = useRef({ k: -1, item: 0, finished: false, progress: -1, lapShown: 1 });
   const particles = useRef<Particle[]>([]);
@@ -188,6 +201,8 @@ export function RaceScreen({ session, game, meId }: Props) {
   useEffect(() => {
     const onSnapshot = (snap: RaceSnapshot) => {
       const recv = Date.now();
+      arrivals.current.push(recv);
+      if (arrivals.current.length > 21) arrivals.current.shift();
       offsets.current.push(snap.now - recv);
       if (offsets.current.length > 30) offsets.current.shift();
       snaps.current.push(snap);
@@ -199,9 +214,11 @@ export function RaceScreen({ session, game, meId }: Props) {
       const m = meInfo.current;
       if (mine) {
         const c = car.current;
-        // A new placement, or the server disagreeing a lot, puts us where the server says.
-        if (!c || mine[8] !== m.k || Math.hypot(mine[1] - c.x, mine[2] - c.y) > SNAP_DIST) {
+        // A new placement, or the server disagreeing a lot, puts us where the server says. The
+        // server's view is from a moment ago, so it is matched against where we have recently been.
+        if (!c || mine[8] !== m.k || driftFrom(trail.current, c, mine[1], mine[2]) > SNAP_DIST) {
           const fresh = newCar(mine[1], mine[2], mine[3] / 100);
+          trail.current = [];
           if (c && mine[8] === m.k) {
             fresh.v = c.v;
             fresh.crashes = c.crashes;
@@ -320,6 +337,7 @@ export function RaceScreen({ session, game, meId }: Props) {
     let shakeUntil = 0;
     let wrongSince = 0;
     let lastCount: number | null = null;
+    let interpMs = INTERP_MIN_MS;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
@@ -398,8 +416,15 @@ export function RaceScreen({ session, game, meId }: Props) {
         }
       }
 
-      // Everyone else, a little in the past.
-      const world = interpolate(snaps.current, now - INTERP_MS);
+      if (playing && c) {
+        const tr = trail.current;
+        tr.push({ t: now, x: c.x, y: c.y });
+        while (tr.length && tr[0]!.t < now - HISTORY_MS) tr.shift();
+      }
+
+      // Everyone else, a little in the past. The delay eases toward its target so time never jumps.
+      interpMs += (interpTarget(arrivals.current) - interpMs) * Math.min(1, dt * 2);
+      const world = interpolate(snaps.current, now - interpMs);
       const order = standings(world, g);
 
       // Camera: behind my car, or following someone (or the whole map) when watching.
@@ -884,9 +909,39 @@ function standings(world: WorldCar[], g: RaceView) {
   });
 }
 
-/** Blends the two snapshots around render time. */
+/** How far our recent positions are from where the server put us. */
+function driftFrom(trail: { x: number; y: number }[], c: CarState, x: number, y: number) {
+  let best = Math.hypot(x - c.x, y - c.y);
+  for (const p of trail) best = Math.min(best, Math.hypot(x - p.x, y - p.y));
+  return best;
+}
+
+/** Enough delay to cover nearly every gap between recent snapshots, plus a margin. */
+function interpTarget(arrivals: number[]) {
+  if (arrivals.length < 4) return INTERP_MIN_MS;
+  const gaps = arrivals.slice(1).map((t, i) => t - arrivals[i]!);
+  gaps.sort((a, b) => a - b);
+  const p90 = gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * 0.9))]!;
+  return Math.max(INTERP_MIN_MS, Math.min(INTERP_MAX_MS, p90 + 60));
+}
+
+/** Blends the two snapshots around render time, or carries cars on past the newest one. */
 function interpolate(snaps: RaceSnapshot[], rt: number): WorldCar[] {
   if (!snaps.length) return [];
+  const newest = snaps[snaps.length - 1]!;
+  if (rt > newest.now) {
+    const ahead = Math.min(rt - newest.now, EXTRAPOLATE_MS) / 1000;
+    return newest.players.map((p) => {
+      const h = p[3] / 100;
+      // Finished cars stay put.
+      const go = p[5] & RACE_FLAG.finished ? 0 : p[4] * ahead;
+      const x = p[1] + Math.cos(h) * go;
+      const y = p[2] + Math.sin(h) * go;
+      // On a bend, a straight guess would leave the road, so it stops at the wall.
+      const at = go ? clampToWalls(x, y, locate(x, y)) : { x, y };
+      return { n: p[0], x: at.x, y: at.y, h, v: p[4], flags: p[5], progress: p[6] + go };
+    });
+  }
   let b = snaps.findIndex((s) => s.now >= rt);
   if (b === -1) b = snaps.length - 1;
   const a = Math.max(0, b - 1);
