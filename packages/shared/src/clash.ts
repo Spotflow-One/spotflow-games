@@ -20,6 +20,11 @@ export const CLASH_RULES = {
   respawnMs: 4000,
   spawnShieldMs: 2000,
   fireCooldownMs: 160,
+  /**
+   * A dodge is a quick roll: a short dash during which shots pass straight through you. You
+   * can't shoot while rolling, and it takes a moment to be ready again.
+   */
+  dodge: { distance: 190, ms: 280, cooldownMs: 2200 },
   shotSpeed: 1100,
   shotRange: 900,
   shotRadius: 5,
@@ -278,12 +283,14 @@ export const clashInputSchema = z
     s: z.number().int().min(0).max(1_000_000_000),
     /** The life the client is on. Positions from before a respawn are ignored. */
     l: z.number().int().min(0).max(1_000_000),
+    /** Dodge counter: a change starts a roll, if one is ready. */
+    d: z.number().int().min(0).max(1_000_000_000).optional(),
   })
   .strict();
 export type ClashInput = z.infer<typeof clashInputSchema>;
 
 /** Bits in a player's snapshot flags. */
-export const CLASH_FLAG = { alive: 1, shield: 2, hurt: 4, firing: 8 } as const;
+export const CLASH_FLAG = { alive: 1, shield: 2, hurt: 4, firing: 8, dodge: 16 } as const;
 
 /**
  * One player in a snapshot: number, x, y, aim (centiradians), health, flags, life, personal

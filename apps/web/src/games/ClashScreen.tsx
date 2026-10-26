@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Crosshair, Maximize2, Minimize2, MousePointer2, RotateCcw, Shield, Swords, Zap } from "lucide-react";
+import {
+  Crosshair,
+  Footprints,
+  Maximize2,
+  Minimize2,
+  MousePointer2,
+  RotateCcw,
+  Shield,
+  Swords,
+  Zap,
+} from "lucide-react";
 import {
   CLASH_CENTER,
   CLASH_FLAG,
@@ -123,6 +133,7 @@ export function ClashScreen({ session, game, meId }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<ClashWorld | null>(null);
+  const dodgeRef = useRef<HTMLElement | null>(null);
   const [noGl, setNoGl] = useState(false);
   const touch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   const [full, setFull] = useState(touch);
@@ -166,6 +177,11 @@ export function ClashScreen({ session, game, meId }: Props) {
     yaw: 0,
     shotCount: 0,
     lastLocalShot: 0,
+    /** A dodge asked for; counted up when it starts, which is what the server watches. */
+    dodgeAsked: false,
+    dodgeCount: 0,
+    dodgeReadyAt: 0,
+    dash: null as { until: number; dx: number; dy: number } | null,
     move: null as Stick | null,
     look: null as Stick | null,
   });
@@ -300,7 +316,7 @@ export function ClashScreen({ session, game, meId }: Props) {
   useEffect(() => {
     const c = controls.current;
     const gameKey = (k: string) =>
-      ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k);
+      ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "shift"].includes(k);
     const typing = (e: KeyboardEvent) =>
       e.target instanceof HTMLElement &&
       (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
@@ -311,6 +327,8 @@ export function ClashScreen({ session, game, meId }: Props) {
       if (k === " ") {
         if (!c.spaceDown) c.shotCount++;
         c.spaceDown = true;
+      } else if (k === "shift") {
+        if (!e.repeat) c.dodgeAsked = true;
       } else c.keys.add(k);
     };
     const up = (e: KeyboardEvent) => {
@@ -482,7 +500,33 @@ export function ClashScreen({ session, game, meId }: Props) {
       }
       const fx = Math.cos(c.yaw);
       const fy = Math.sin(c.yaw);
-      if (alive && (fwd || side)) {
+      // A dodge rolls the way you're moving, or to your right when standing still.
+      if (c.dodgeAsked) {
+        c.dodgeAsked = false;
+        if (alive && t >= c.dodgeReadyAt && !c.dash) {
+          let dx = fx * fwd - fy * side;
+          let dy = fy * fwd + fx * side;
+          const len = Math.hypot(dx, dy);
+          if (len > 0.1) {
+            dx /= len;
+            dy /= len;
+          } else {
+            dx = -fy;
+            dy = fx;
+          }
+          c.dash = { until: t + R.dodge.ms, dx, dy };
+          c.dodgeCount++;
+          c.dodgeReadyAt = t + R.dodge.cooldownMs;
+          burst(particles.current, m.x, m.y, 2, 10, "#c9b08a");
+        }
+      }
+      if (c.dash && (t >= c.dash.until || !alive)) c.dash = null;
+      if (c.dash) {
+        const step = (R.dodge.distance / R.dodge.ms) * 1000 * dt;
+        const p = resolveCircle(m.x + c.dash.dx * step, m.y + c.dash.dy * step, R.playerRadius);
+        m.x = p.x;
+        m.y = p.y;
+      } else if (alive && (fwd || side)) {
         const step = R.playerSpeed * dt;
         const p = resolveCircle(
           m.x + (fx * fwd - fy * side) * step,
@@ -528,7 +572,8 @@ export function ClashScreen({ session, game, meId }: Props) {
       // On a phone, holding fire also turns you gently onto the target.
       if (target && c.fireBtn) c.yaw = lerpAngle(c.yaw, target.a, Math.min(1, dt * 5));
       const aim = target && trigger ? target.a : c.yaw;
-      const firing = alive && trigger;
+      // No shooting mid-roll.
+      const firing = alive && trigger && !c.dash;
       if (firing && t - c.lastLocalShot >= R.fireCooldownMs) {
         c.lastLocalShot = t;
         playSound("zap", soundRef.current);
@@ -543,6 +588,7 @@ export function ClashScreen({ session, game, meId }: Props) {
           f: firing,
           s: c.shotCount,
           l: m.life,
+          d: c.dodgeCount,
         });
         const since = t - sent.current.at;
         if ((body !== sent.current.body && since >= SEND_EVERY_MS) || since >= HEARTBEAT_MS) {
@@ -571,6 +617,14 @@ export function ClashScreen({ session, game, meId }: Props) {
         shotList.push({ id, x: x0 + vx * e, y: y0 + vy * e, vx, vy, team });
       }
 
+      // The dodge meter fills as the roll recharges.
+      const meter = dodgeRef.current;
+      if (meter) {
+        const ready = Math.max(0, Math.min(1, 1 - (c.dodgeReadyAt - t) / R.dodge.cooldownMs));
+        meter.style.setProperty("--r", ready.toFixed(3));
+        meter.classList.toggle("ready", ready >= 1);
+      }
+
       // The 3D world.
       const w3 = worldRef.current;
       ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
@@ -586,6 +640,7 @@ export function ClashScreen({ session, game, meId }: Props) {
       if (alive) {
         let flags = m.flags & CLASH_FLAG.shield;
         if (firing) flags |= CLASH_FLAG.firing;
+        if (c.dash) flags |= CLASH_FLAG.dodge;
         if (performance.now() - m.hurtAt < 120) flags |= CLASH_FLAG.hurt;
         players.push({ n: myN, x: m.x, y: m.y, a: aim, team: myTeam, flags });
       }
@@ -717,6 +772,10 @@ export function ClashScreen({ session, game, meId }: Props) {
     if (game.isPlayer) canvasRef.current?.focus();
   }, [game.isPlayer]);
 
+  const dodgeNow = (e: React.PointerEvent) => {
+    e.preventDefault();
+    controls.current.dodgeAsked = true;
+  };
   const fireHold = {
     onPointerDown: (e: React.PointerEvent) => {
       e.preventDefault();
@@ -838,6 +897,19 @@ export function ClashScreen({ session, game, meId }: Props) {
               </span>
               <span className="sg-num">{hud.hp}</span>
             </span>
+            {!touch && (
+              <span
+                className="clash-dodge"
+                aria-hidden="true"
+                ref={(el) => {
+                  dodgeRef.current = el;
+                }}
+              >
+                <Footprints size={14} />
+                <i />
+                <kbd>Shift</kbd>
+              </span>
+            )}
             <span className="sg-num clash-pts">{hud.points} pts</span>
           </div>
         )}
@@ -847,6 +919,19 @@ export function ClashScreen({ session, game, meId }: Props) {
           </div>
         )}
 
+        {touch && game.isPlayer && (
+          <button
+            type="button"
+            className="clash-roll"
+            aria-label="Dodge roll"
+            ref={(el) => {
+              if (touch) dodgeRef.current = el;
+            }}
+            onPointerDown={dodgeNow}
+          >
+            <Footprints aria-hidden="true" size={22} />
+          </button>
+        )}
         {touch && game.isPlayer && (
           <button type="button" className="clash-fire" aria-label="Fire" {...fireHold}>
             <Crosshair aria-hidden="true" size={30} />
@@ -887,8 +972,8 @@ export function ClashScreen({ session, game, meId }: Props) {
         <p className="clash-help sg-muted">
           <Crosshair aria-hidden="true" size={16} />
           Move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>. Turn with the mouse or <kbd>←</kbd>{" "}
-          <kbd>→</kbd>. Click or hold to fire; <kbd>Space</kbd> fires with aim help. Teammates spot enemies on your
-          minimap, and your base heals you.
+          <kbd>→</kbd>. Click or hold to fire; <kbd>Space</kbd> fires with aim help; <kbd>Shift</kbd> rolls out of the
+          way of shots. Teammates spot enemies on your minimap, and your base heals you.
         </p>
       )}
       <span className="visually-hidden" aria-live="polite">

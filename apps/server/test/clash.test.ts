@@ -20,6 +20,7 @@ interface Fighter {
   alive: boolean;
   life: number;
   shieldUntil: number;
+  dodgeUntil?: number;
   points: number;
   eliminations: number;
 }
@@ -58,7 +59,11 @@ const lastSnap = (hooks: RoomHooks) => {
   const calls = (hooks.sendEvent as ReturnType<typeof vi.fn>).mock.calls;
   return calls[calls.length - 1]![1] as ClashSnapshot;
 };
-const input = (room: Room, id: string, v: Partial<{ x: number; y: number; a: number; f: boolean; s: number }>) => {
+const input = (
+  room: Room,
+  id: string,
+  v: Partial<{ x: number; y: number; a: number; f: boolean; s: number; d: number }>,
+) => {
   const f = state(room).fighters.get(id)!;
   room.inputs.set(id, { value: { x: f.x, y: f.y, a: 0, f: false, s: 0, l: f.life, ...v }, at: Date.now() });
 };
@@ -169,6 +174,44 @@ describe("Core Clash", () => {
     const me = lastSnap(hooks).players.find((p) => p[0] === b.n)!;
     expect(me[5] & CLASH_FLAG.alive).toBeTruthy();
     expect(me[5] & CLASH_FLAG.shield).toBeTruthy();
+  });
+
+  it("lets a rolling player dodge shots and dash, once per recharge", async () => {
+    const { room, hooks } = makeRoom();
+    await room.start("host");
+    const { a, b } = duel(room);
+    input(room, b.userId, { d: 0 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+
+    // b rolls just as a shot comes in: it flies straight past.
+    input(room, b.userId, { d: 1 });
+    input(room, a.userId, { f: true, a: 0 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).players.find((p) => p[0] === b.n)![5] & CLASH_FLAG.dodge).toBeTruthy();
+    input(room, a.userId, { f: false, a: 0 });
+    input(room, b.userId, { d: 1, x: b.x + 150 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    // The roll covers ground much faster than running.
+    expect(b.x).toBeGreaterThan(400 + CLASH_RULES.playerSpeed * 0.1 * 1.6 + 6);
+    vi.advanceTimersByTime(800);
+    expect(b.hp).toBe(CLASH_RULES.playerHp);
+
+    // Rolling again straight away does nothing until the dodge recharges.
+    input(room, b.userId, { d: 2 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(b.dodgeUntil! < Date.now()).toBe(true);
+    vi.advanceTimersByTime(CLASH_RULES.dodge.cooldownMs);
+    input(room, b.userId, { d: 3 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(b.dodgeUntil! > Date.now()).toBe(true);
+
+    // Without a roll, the same shot lands.
+    vi.advanceTimersByTime(CLASH_RULES.dodge.ms);
+    input(room, a.userId, { f: true, a: Math.atan2(b.y - a.y, b.x - a.x) });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    input(room, a.userId, { f: false, a: 0 });
+    vi.advanceTimersByTime(600);
+    expect(b.hp).toBe(CLASH_RULES.playerHp - CLASH_RULES.shotDamage);
   });
 
   it("ends when a team reaches the target and awards points and the win bonus once", async () => {
