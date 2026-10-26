@@ -1,38 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { Monitor, Moon, Sun } from "lucide-react";
-import {
-  AVATAR_OPTIONS,
-  DEFAULT_AVATAR,
-  type AvatarConfig,
-  type Me as MeType,
-  type ThemePreference,
-} from "@spotflow-games/shared";
+import { DEFAULT_AVATAR, type AvatarConfig, type Me as MeType, type ThemePreference } from "@spotflow-games/shared";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { usePreferences } from "../lib/preferences";
 import { Avatar } from "../components/Avatar";
-
-const LABELS: Record<keyof AvatarConfig, string> = {
-  skin: "Skin tone",
-  hairStyle: "Hair",
-  hairColor: "Hair colour",
-  eyes: "Eyes",
-  mouth: "Mouth",
-  shirt: "Top",
-  accessory: "Accessory",
-  background: "Background",
-};
-
-/** CSS variable holding the swatch colour for colour options. */
-const SWATCH: Partial<Record<keyof AvatarConfig, (v: number) => string>> = {
-  skin: (v) => `var(--skin-${v})`,
-  hairColor: (v) => `var(--hair-${v})`,
-  background: (v) => `var(--avatar-bg-${v})`,
-  shirt: (v) => `var(--brush-${["blue", "green", "orange", "purple", "red"][v - 1]})`,
-};
-
-const pretty = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+import { AvatarOptions, randomAvatar } from "../components/AvatarOptions";
 
 export function Me() {
   const { me, setMe } = useAuth();
@@ -85,49 +59,12 @@ export function Me() {
               <button className="sg-btn" onClick={saveAvatar}>
                 Save avatar
               </button>
-              <button
-                className="sg-btn ghost"
-                onClick={() => {
-                  const pick = <T,>(xs: readonly T[]) => xs[Math.floor(Math.random() * xs.length)]!;
-                  setDraft(
-                    Object.fromEntries(
-                      Object.entries(AVATAR_OPTIONS).map(([k, xs]) => [k, pick(xs as readonly unknown[])]),
-                    ) as AvatarConfig,
-                  );
-                }}
-              >
+              <button className="sg-btn ghost" onClick={() => setDraft(randomAvatar())}>
                 Surprise me
               </button>
             </div>
           </div>
-          <div className="builder-options">
-            {(Object.keys(AVATAR_OPTIONS) as Array<keyof AvatarConfig>).map((key) => (
-              <div key={key} className="sg-field">
-                <label id={`opt-${key}`}>{LABELS[key]}</label>
-                <div className="sg-seg" role="radiogroup" aria-labelledby={`opt-${key}`}>
-                  {(AVATAR_OPTIONS[key] as readonly (string | number)[]).map((value, i) => {
-                    const swatch = SWATCH[key];
-                    const label = swatch ? `${LABELS[key]} ${i + 1}` : pretty(String(value));
-                    return (
-                      <button
-                        key={String(value)}
-                        role="radio"
-                        aria-checked={draft[key] === value}
-                        aria-label={label}
-                        onClick={() => setDraft({ ...draft, [key]: value })}
-                      >
-                        {swatch ? (
-                          <span className="color-chip" style={{ background: swatch(value as number) }} />
-                        ) : (
-                          label
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
+          <AvatarOptions value={draft} onChange={setDraft} />
         </div>
       </section>
 
