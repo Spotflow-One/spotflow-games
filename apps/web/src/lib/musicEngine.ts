@@ -1,14 +1,14 @@
 /**
- * Looping EDM background music: four-on-the-floor kicks, pumping supersaw chords, a rolling
- * off-beat bass, a supersaw lead with echo, and snare-roll builds into the drop. Synthesized
+ * Looping cyberpunk background music: punchy backbeat drums, a gritty distorted bass, fast
+ * 16th-note arpeggios, dark supersaw pads, a lead with echo, and snare-roll builds. Synthesized
  * with Web Audio, so there are no audio files to load or license, and the tunes are original.
  * Each bar is sixteen 16th-note steps: a note name plays, "-" holds the previous lead note,
- * "." is a rest.
+ * "." is a rest. Flats are written as sharps (D#, not Eb).
  */
 interface Bar {
   /** Chord notes for the supersaw pad, held for the whole bar. */
   chord: string[];
-  /** The bass note, played on every off-beat. */
+  /** The bass note, played in a galloping 16th pattern. */
   root: string;
   /** 16 lead steps. */
   lead?: string;
@@ -27,38 +27,38 @@ export interface Track {
 export type TrackName = "arcade" | "victory";
 
 export const TRACKS: Record<TrackName, Track> = {
-  // Home page "Insert Coin": A minor festival anthem. A build, four bars of groove, then the hook.
+  // Home page "Insert Coin": C minor night drive. A build, four bars of arps, then the hook.
   arcade: {
-    bpm: 128,
-    sweep: [900, 5200],
+    bpm: 118,
+    sweep: [600, 3800],
     intro: [
-      { chord: ["A3", "C4", "E4"], root: "A2", drums: "build" },
-      { chord: ["B3", "D4", "G4"], root: "G2", drums: "build" },
+      { chord: ["C4", "D#4", "G4"], root: "C2", drums: "build" },
+      { chord: ["G3", "B3", "D4"], root: "G1", drums: "build" },
     ],
     loop: [
-      { chord: ["A3", "C4", "E4"], root: "A2" },
-      { chord: ["A3", "C4", "F4"], root: "F2" },
-      { chord: ["G3", "C4", "E4"], root: "C3" },
-      { chord: ["G3", "B3", "D4"], root: "G2" },
-      { chord: ["A3", "C4", "E4"], root: "A2", lead: "A5 . A5 C6 . A5 . E6 - . D6 . C6 . B5 ." },
-      { chord: ["A3", "C4", "F4"], root: "F2", lead: "A5 . A5 C6 . A5 . F6 - . E6 . C6 . A5 ." },
-      { chord: ["G3", "C4", "E4"], root: "C3", lead: "G5 . G5 C6 . G5 . E6 - . D6 . C6 . D6 ." },
-      { chord: ["G3", "B3", "D4"], root: "G2", lead: "B5 - - . G5 . B5 . D6 - - . E6 - D6 ." },
+      { chord: ["C4", "D#4", "G4"], root: "C2" },
+      { chord: ["G#3", "C4", "D#4"], root: "G#1" },
+      { chord: ["F3", "G#3", "C4"], root: "F1" },
+      { chord: ["G3", "B3", "D4"], root: "G1" },
+      { chord: ["C4", "D#4", "G4"], root: "C2", lead: "G5 - . G5 . D#6 - . D6 - . C6 . D6 - ." },
+      { chord: ["G#3", "C4", "D#4"], root: "G#1", lead: "C6 - . C6 . D#6 - . G6 - - . F6 . D#6 ." },
+      { chord: ["F3", "G#3", "C4"], root: "F1", lead: "F6 - . D#6 . C6 - . G#5 - . C6 . D#6 - ." },
+      { chord: ["G3", "B3", "D4"], root: "G1", lead: "D6 - - - B5 - - . G5 . B5 . D6 - F6 ." },
     ],
   },
-  // Winner screen "High Score": an uplifting D major drop after a short build.
+  // Winner screen "High Score": a heroic A minor drop after a short build.
   victory: {
-    bpm: 128,
-    sweep: [1400, 6500],
+    bpm: 124,
+    sweep: [1000, 5500],
     intro: [
-      { chord: ["D4", "F#4", "A4"], root: "D2", drums: "build" },
-      { chord: ["C#4", "E4", "A4"], root: "A2", drums: "build" },
+      { chord: ["A3", "C4", "E4"], root: "A1", drums: "build" },
+      { chord: ["G#3", "B3", "E4"], root: "E1", drums: "build" },
     ],
     loop: [
-      { chord: ["D4", "F#4", "A4"], root: "D2", lead: "D6 - . A5 . D6 . F#6 - - . E6 . D6 . ." },
-      { chord: ["C#4", "E4", "A4"], root: "A2", lead: "C#6 - . A5 . C#6 . E6 - - . D6 . C#6 . ." },
-      { chord: ["D4", "F#4", "B4"], root: "B2", lead: "B5 - . F#5 . B5 . D6 - . F#6 - E6 . D6 ." },
-      { chord: ["D4", "G4", "B4"], root: "G2", lead: "G6 - - - F#6 - - - E6 - . D6 . E6 - ." },
+      { chord: ["A3", "C4", "E4"], root: "A1", lead: "E6 - . A5 . C6 . E6 - . A6 - G6 . E6 ." },
+      { chord: ["A3", "C4", "F4"], root: "F1", lead: "F6 - . C6 . A5 . C6 - . F6 - E6 . C6 ." },
+      { chord: ["G3", "C4", "E4"], root: "C2", lead: "G6 - . E6 . C6 . E6 - . G6 - A6 . G6 ." },
+      { chord: ["G#3", "B3", "E4"], root: "E1", lead: "G#6 - - - B6 - - - E6 - - . G#6 - B6 ." },
     ],
   },
 };
@@ -91,6 +91,23 @@ function compile(bar: Bar): CompiledBar {
 }
 
 const LOOKAHEAD_S = 0.15;
+/** Kick pattern: a driving backbeat with a push before beat four. */
+const KICKS = "x.......x.x.....";
+/** Arpeggio order through the chord, up an octave and back: indexes past the chord jump an octave. */
+const ARP = [0, 1, 2, 3, 4, 5, 4, 3, 0, 1, 2, 3, 4, 5, 4, 3];
+
+/** The arpeggio note for a step, an octave above the chord, or two for the upper half. */
+function arpNote(chord: number[], step: number) {
+  const k = ARP[step]!;
+  return chord[k % chord.length]! * (k >= chord.length ? 4 : 2);
+}
+
+/** Hard clipping curve that makes the bass growl. */
+const DRIVE = (() => {
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) curve[i] = Math.tanh(5 * ((i / 255) * 2 - 1));
+  return curve;
+})();
 /** Detune (cents) of the stacked saws that make a "supersaw". */
 const SUPERSAW = [-14, 0, 14];
 
@@ -211,13 +228,13 @@ export class MusicPlayer {
       const t = this.nextTime;
 
       if (i === 0) this.pad(bar.chord, t, this.cutoff(barIndex), this.cutoff(barIndex + 1));
+      this.arp(arpNote(bar.chord, i), t);
       if (bar.drums === "full") {
-        if (i % 4 === 0) this.kick(t);
-        if (i === 4 || i === 12) this.clap(t);
-        if (i % 4 === 2) {
-          this.hat(t, 0.14, 0.45);
-          this.bass(bar.root, t);
-        } else if (i % 2 === 1) this.hat(t, 0.03, 0.15);
+        if (KICKS[i] === "x") this.kick(t);
+        if (i === 4 || i === 12) this.snare(t);
+        if (i % 2 === 0) this.hat(t, i % 4 === 2 ? 0.1 : 0.03, i % 4 === 2 ? 0.35 : 0.2);
+        // Galloping bass: three 16ths in every beat.
+        if (i % 4 !== 1) this.bass(bar.root, t);
       } else {
         this.buildStep(barIndex, i, t);
       }
@@ -277,8 +294,8 @@ export class MusicPlayer {
     osc.stop(t + 0.26);
     // Duck the pads and bass, then let them swell back up before the next beat.
     const pump = this.pump!.gain;
-    pump.setValueAtTime(0.12, t);
-    pump.linearRampToValueAtTime(1, t + this.stepS * 3.2);
+    pump.setValueAtTime(0.4, t);
+    pump.linearRampToValueAtTime(1, t + this.stepS * 3);
   }
 
   private noiseHit(t: number, type: BiquadFilterType, hz: number, dur: number, level: number) {
@@ -298,6 +315,40 @@ export class MusicPlayer {
   private clap(t: number, level = 0.9) {
     // Three quick bursts read as hands clapping together.
     for (const d of [0, 0.01, 0.02]) this.noiseHit(t + d, "bandpass", 1500, 0.09 + d * 4, level);
+  }
+
+  /** A big snare: a tonal body under a noise crack and a clap. */
+  private snare(t: number) {
+    const ctx = this.ctx!;
+    const body = ctx.createOscillator();
+    const gain = ctx.createGain();
+    body.type = "triangle";
+    body.frequency.setValueAtTime(220, t);
+    body.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+    this.env(gain, t, 0.8, 0.12);
+    body.connect(gain).connect(this.mix!);
+    body.start(t);
+    body.stop(t + 0.14);
+    this.noiseHit(t, "highpass", 1800, 0.25, 1);
+    this.clap(t, 0.7);
+  }
+
+  /** A short, resonant square pluck for the 16th-note arpeggio. */
+  private arp(hz: number, t: number) {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = hz;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = 8;
+    filter.frequency.setValueAtTime(3200, t);
+    filter.frequency.exponentialRampToValueAtTime(600, t + this.stepS);
+    const gain = ctx.createGain();
+    this.env(gain, t, 0.13, this.stepS * 0.95);
+    osc.connect(filter).connect(gain).connect(this.leadBus!);
+    osc.start(t);
+    osc.stop(t + this.stepS);
   }
 
   private hat(t: number, dur: number, level: number) {
@@ -335,8 +386,8 @@ export class MusicPlayer {
     filter.frequency.linearRampToValueAtTime(to, t + dur);
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
-    gain.gain.setValueAtTime(0.09, t + dur - 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.07, t + 0.02);
+    gain.gain.setValueAtTime(0.07, t + dur - 0.03);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     filter.connect(gain).connect(this.pump!);
     for (const hz of chord)
@@ -351,27 +402,27 @@ export class MusicPlayer {
       }
   }
 
-  /** Rolling off-beat bass: a saw with a square an octave down, pumped by the kick. */
+  /** Gritty bass: detuned saws through hard clipping and a closing filter. */
   private bass(hz: number, t: number) {
     const ctx = this.ctx!;
+    const drive = ctx.createWaveShaper();
+    drive.curve = DRIVE;
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.Q.value = 4;
-    filter.frequency.setValueAtTime(1600, t);
-    filter.frequency.exponentialRampToValueAtTime(400, t + this.stepS * 1.8);
+    filter.Q.value = 5;
+    filter.frequency.setValueAtTime(1800, t);
+    filter.frequency.exponentialRampToValueAtTime(300, t + this.stepS * 0.9);
     const gain = ctx.createGain();
-    this.env(gain, t, 0.55, this.stepS * 1.9);
-    filter.connect(gain).connect(this.pump!);
-    for (const [type, mult] of [
-      ["sawtooth", 1],
-      ["square", 0.5],
-    ] as const) {
+    this.env(gain, t, 0.35, this.stepS * 0.95);
+    drive.connect(filter).connect(gain).connect(this.pump!);
+    for (const detune of [-12, 12]) {
       const osc = ctx.createOscillator();
-      osc.type = type;
-      osc.frequency.value = hz * mult;
-      osc.connect(filter);
+      osc.type = "sawtooth";
+      osc.frequency.value = hz;
+      osc.detune.value = detune;
+      osc.connect(drive);
       osc.start(t);
-      osc.stop(t + this.stepS * 2);
+      osc.stop(t + this.stepS);
     }
   }
 
