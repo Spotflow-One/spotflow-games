@@ -34,6 +34,7 @@ body { margin: 0; background: var(--surface); color: var(--ink); font-family: va
 .sg-btn.quiz { --b: var(--game-quiz); --bh: var(--game-quiz); --bi: var(--on-game-quiz); }
 .sg-btn.draw { --b: var(--game-draw); --bh: var(--game-draw); --bi: var(--on-game-draw); }
 .sg-btn.truths { --b: var(--game-truths); --bh: var(--game-truths); --bi: var(--on-game-truths); }
+.sg-btn.clash { --b: var(--game-clash); --bh: var(--game-clash); --bi: var(--on-game-clash); }
 .sg-btn[disabled] { background: var(--surface-sunken); color: var(--ink-muted); border-color: var(--border); box-shadow: none; cursor: not-allowed; transform: none; }
 .sg-btn.icon { padding: 0; width: var(--size-target); }
 
@@ -58,6 +59,7 @@ body { margin: 0; background: var(--surface); color: var(--ink); font-family: va
 .sg-badge.quiz { background: var(--game-quiz-soft); color: var(--game-quiz-ink); }
 .sg-badge.draw { background: var(--game-draw-soft); color: var(--game-draw-ink); }
 .sg-badge.truths { background: var(--game-truths-soft); color: var(--game-truths-ink); }
+.sg-badge.clash { background: var(--game-clash-soft); color: var(--game-clash-ink); }
 .sg-badge.success { background: var(--success-soft); color: var(--success); }
 .sg-badge.danger { background: var(--danger-soft); color: var(--danger); }
 .sg-badge.warning { background: var(--warning-soft); color: var(--warning); }
@@ -75,6 +77,7 @@ body { margin: 0; background: var(--surface); color: var(--ink); font-family: va
   background: var(--surface-raised); border: 1px solid var(--border); box-shadow: var(--shadow-sm); min-width: 0; }
 .sg-game.draw { --g: var(--game-draw); --gs: var(--game-draw-soft); --gi: var(--game-draw-ink); --go: var(--on-game-draw); }
 .sg-game.truths { --g: var(--game-truths); --gs: var(--game-truths-soft); --gi: var(--game-truths-ink); --go: var(--on-game-truths); }
+.sg-game.clash { --g: var(--game-clash); --gs: var(--game-clash-soft); --gi: var(--game-clash-ink); --go: var(--on-game-clash); }
 .sg-game .mark { width: 56px; height: 56px; border-radius: var(--radius-lg); background: var(--g); color: var(--go); display: grid; place-items: center; }
 .sg-game .mark svg { width: 30px; height: 30px; }
 .sg-game .meta { color: var(--ink-muted); font-size: 14px; line-height: 20px; }
@@ -97,7 +100,7 @@ body { margin: 0; background: var(--surface); color: var(--ink); font-family: va
   background: conic-gradient(var(--c) calc(var(--p) * 360deg), var(--surface-sunken) 0); display: grid; place-items: center; }
 .sg-timer::before { content: ""; position: absolute; inset: 8px; border-radius: inherit; background: var(--surface-raised); }
 .sg-timer span { position: relative; font: 700 28px/32px var(--font-mono); font-variant-numeric: tabular-nums; }
-.sg-timer.draw { --c: var(--game-draw); } .sg-timer.truths { --c: var(--game-truths); }
+.sg-timer.draw { --c: var(--game-draw); } .sg-timer.truths { --c: var(--game-truths); } .sg-timer.clash { --c: var(--game-clash); }
 .sg-timer.urgent { --c: var(--warning); }
 .sg-timer-note { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--warning); font-weight: 700; font-size: 14px; }
 .sg-progress { height: 8px; border-radius: var(--radius-full); background: var(--surface-sunken); overflow: hidden; }

@@ -16,6 +16,7 @@ import {
 import {
   GAME_INFO,
   MAX_PLAYERS_PER_SESSION,
+  type ClashView,
   type DrawView,
   type ParticipantView,
   type QuizView,
@@ -33,6 +34,7 @@ import { TokyoRun } from "../components/TokyoRun";
 import { GameIcon } from "../components/GameIcon";
 import { Confetti } from "../components/Confetti";
 import { rankedPlayers } from "../components/Standings";
+import { ClashOutcome, ClashScreen } from "../games/ClashScreen";
 import { DrawScreen } from "../games/DrawScreen";
 import { QuizScreen } from "../games/QuizScreen";
 import { TruthsScreen } from "../games/TruthsScreen";
@@ -252,7 +254,13 @@ export function Session() {
       {playing && view.game !== null && view.gameType === "truths" && (
         <TruthsScreen session={view} game={view.game as TruthsView} meId={me.id} onError={setNotice} />
       )}
+      {playing && view.game !== null && view.gameType === "clash" && (
+        <ClashScreen session={view} game={view.game as ClashView} meId={me.id} />
+      )}
 
+      {finished && view.game !== null && view.gameType === "clash" && (
+        <ClashOutcome session={view} game={view.game as ClashView} meId={me.id} />
+      )}
       {finished && <Results view={view} meId={me.id} />}
 
       {inLobby && (
@@ -426,20 +434,24 @@ function Results({ view, meId }: { view: SessionView; meId: string }) {
   const podium = [players[1], players[0], players[2]].filter((p) => p !== undefined);
   const rest = players.slice(3);
   const iWon = winners.some((p) => p.userId === meId);
+  // In a team game the team result comes first, so the podium crowns the top scorer.
+  const team = view.gameType === "clash";
   const headline =
     winners.length === 0
       ? "Game over"
       : winners.length > 1
         ? "It's a tie!"
         : iWon
-          ? "You win!"
-          : `${winners[0]!.displayName} wins!`;
+          ? team
+            ? "You're the MVP!"
+            : "You win!"
+          : `${winners[0]!.displayName} ${team ? "is the MVP!" : "wins!"}`;
   const mine = players.find((p) => p.userId === meId);
   return (
     <>
       <section className={`results-hero ${view.gameType}`} aria-labelledby="results-heading">
         {winners.length > 0 && <Confetti />}
-        <span className="sg-eyebrow">Final results</span>
+        <span className="sg-eyebrow">{team ? "Top scorers" : "Final results"}</span>
         <h1 id="results-heading" className="display-xl">
           <Trophy aria-hidden="true" className="results-trophy" />
           {headline}

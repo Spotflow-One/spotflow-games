@@ -112,10 +112,13 @@ export class Room {
   readonly scoreEvents: PendingScoreEvent[] = [];
   /** Due times of the game's named timers, in epoch ms. */
   readonly timers: Record<string, number> = {};
+  /** Latest held controls per player. Kept beside the snapshot, never inside it (see GameContext.inputs). */
+  inputs = new Map<string, { value: unknown; at: number }>();
   private awardedKeys = new Set<string>();
   private gameState: unknown = null;
   private broadcastQueued = false;
   private starting = false;
+  private ending = false;
   private localTimer: NodeJS.Timeout | null = null;
   private readonly now: () => number;
   private readonly localTimers: boolean;
@@ -345,7 +348,19 @@ export class Room {
     return this.engine?.actionRateLimit ?? 5;
   }
 
+  get acceptsInput() {
+    return this.engine?.acceptsInput ?? false;
+  }
+
   finish() {
+    if (this.status !== "in_progress" || this.ending) return;
+    this.ending = true;
+    try {
+      this.safely(() => this.engine?.onEnd?.(this.ctx, this.gameState));
+    } finally {
+      this.ending = false;
+    }
+    // A crashing engine closes the room instead.
     if (this.status !== "in_progress") return;
     this.clearTimers();
     this.status = "results";
@@ -522,6 +537,7 @@ export class Room {
       sendLog: (userId, wrap) => {
         if (this.participants.has(userId)) this.log.sendTo(userId, wrap);
       },
+      inputs: () => this.inputs,
       finish: () => this.finish(),
     };
   }

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."game_type" ADD VALUE 'clash';

@@ -45,6 +45,29 @@ const timerEngine: GameEngine<{ ms: number }, { fired: number; by: string }> = {
   viewFor: (state) => ({ fired: state.fired }),
 };
 
+/** Reads held controls on a timer, like a real-time game's tick, and finishes when told to. */
+const inputEngine: GameEngine<object, { seen: Record<string, unknown> }> = {
+  type: "truths",
+  rulesVersion: 1,
+  minPlayers: 1,
+  acceptsInput: true,
+  parseConfig: () => ({}),
+  start(ctx) {
+    ctx.setTimer("tick", 50);
+    return { seen: {} };
+  },
+  handleAction() {
+    throw new GameError("Unknown action");
+  },
+  onTimer(ctx, state) {
+    for (const [id, { value }] of ctx.inputs()) state.seen[id] = value;
+    ctx.broadcastState();
+    if (Object.values(state.seen).some((v) => (v as { go?: boolean })?.go)) ctx.finish();
+    else ctx.setTimer("tick", 50);
+  },
+  viewFor: (state) => ({ seen: state.seen }),
+};
+
 type Instance = Awaited<ReturnType<typeof buildApp>> & { base: string };
 const instances: Instance[] = [];
 const sockets: Client[] = [];
@@ -53,7 +76,7 @@ const headers = { "content-type": "application/json", "x-requested-with": "spotf
 async function startInstance(): Promise<Instance> {
   const config = loadConfig({ ...process.env, DEV_LOGIN: "true", REDIS_URL: redisUrl });
   const app = await buildApp(config, {
-    registry: new GameRegistry().register(testEngine).register(timerEngine),
+    registry: new GameRegistry().register(testEngine).register(timerEngine).register(inputEngine),
     logger: false,
   });
   await app.app.listen({ port: 0, host: "127.0.0.1" });
@@ -207,5 +230,25 @@ describe("sessions shared through Redis", () => {
     const sync = new Promise<unknown>((resolve) => s.once("game:event", (e) => resolve(e.event)));
     await emit(s, "game:action", { code, action: { type: "sync" } });
     expect(await sync).toEqual({ type: "sync", entries: [1, 2, 3].map((n) => ({ n, by: expect.any(String) })) });
+  });
+
+  it("delivers held controls to the game from any instance, without an ack", async () => {
+    const hostCookie = await signIn(a, "input-host@spotflow.one", "Input Host");
+    const playerCookie = await signIn(b, "input-player@spotflow.one", "Input Player");
+    const code = await createSession(a, hostCookie, "truths");
+    const host = await socketFor(a, hostCookie);
+    const player = await socketFor(b, playerCookie);
+    expect((await emit(host, "session:join", { code })).ok).toBe(true);
+    expect((await emit(player, "session:join", { code })).ok).toBe(true);
+    expect((await emit(host, "session:start", { code })).ok).toBe(true);
+
+    // Oversized input is dropped; later input replaces earlier.
+    player.emit("game:input", { code, input: { pad: "x".repeat(500) } });
+    player.emit("game:input", { code, input: { step: 1 } });
+    await nextState(host, (v) => JSON.stringify(v.game).includes('"step":1'));
+    const done = nextState(host, (v) => v.status === "completed", 4000);
+    player.emit("game:input", { code, input: { go: true } });
+    const final = await done;
+    expect(JSON.stringify(final.game)).not.toContain("pad");
   });
 });

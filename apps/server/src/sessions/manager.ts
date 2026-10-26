@@ -211,6 +211,16 @@ export class SessionManager {
     return room.view;
   }
 
+  /** Whether a game streams held controls with `game:input`. */
+  acceptsInput(gameType: Room["gameType"]) {
+    return this.registry.get(gameType)?.acceptsInput ?? false;
+  }
+
+  /** Stores a player's latest held controls. Only for games that accept input; see GameContext.inputs. */
+  input(code: string, userId: string, value: unknown) {
+    return this.store.setInput(code.toUpperCase(), userId, { value, at: Date.now() });
+  }
+
   /** Tracked, so shutdown waits for players to be marked as disconnected. */
   disconnect(code: string, userId: string, socketId: string) {
     const p = this.store.withRoom(code, (room) => room.disconnect(userId, socketId)).then(() => {});

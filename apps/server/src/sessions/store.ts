@@ -40,6 +40,8 @@ export interface RoomStore {
   /** Store a new room. False if the code is already taken. */
   insert(room: Room): Promise<boolean>;
   info(code: string): Promise<RoomInfo | null>;
+  /** Record a player's latest held controls without taking the room lock. Latest wins. */
+  setInput(code: string, userId: string, input: { value: unknown; at: number }): Promise<void>;
   list(): Promise<RoomInfo[]>;
   /** Codes of every stored room, for sweeping. */
   codes(): Promise<string[]>;
@@ -78,6 +80,11 @@ export class MemoryRoomStore implements RoomStore {
     if (this.rooms.has(room.code)) return false;
     this.rooms.set(room.code, room);
     return true;
+  }
+
+  async setInput(code: string, userId: string, input: { value: unknown; at: number }) {
+    const room = this.rooms.get(code);
+    if (room?.acceptsInput && room.participants.has(userId)) room.inputs.set(userId, input);
   }
 
   async info(code: string) {

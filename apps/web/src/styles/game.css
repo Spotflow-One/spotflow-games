@@ -35,6 +35,12 @@
   --gi: var(--game-truths-ink);
   --go: var(--on-game-truths);
 }
+:root[data-arena="clash"] {
+  --g: var(--game-clash);
+  --gs: var(--game-clash-soft);
+  --gi: var(--game-clash-ink);
+  --go: var(--on-game-clash);
+}
 :root[data-arena] .sg-screen {
   background:
     radial-gradient(circle at 1px 1px, var(--gs) 1.5px, transparent 0) 0 0 / 22px 22px,
@@ -516,6 +522,9 @@
 .confetti i.truths {
   background: var(--game-truths);
 }
+.confetti i.clash {
+  background: var(--game-clash);
+}
 .confetti i.primary {
   background: var(--primary);
 }
@@ -620,6 +629,10 @@
 .live-lobby.truths {
   --g: var(--game-truths);
   --go: var(--on-game-truths);
+}
+.live-lobby.clash {
+  --g: var(--game-clash);
+  --go: var(--on-game-clash);
 }
 .live-lobby:hover {
   transform: translateY(-2px);
@@ -755,6 +768,387 @@ a.sg-btn {
 .race-lane {
   height: clamp(110px, 18vh, 190px);
   margin: calc(var(--space-6) * -1) 0;
+}
+
+/* Core Clash: the arena is always a dark arcade screen, with the HUD drawn over it. */
+:root[data-arena="clash"][data-arena-status="in_progress"] .app-main {
+  max-width: 1280px;
+}
+.clash-stage {
+  --clash-hud: rgba(11, 8, 32, 0.78);
+  display: grid;
+  gap: var(--space-2);
+}
+.clash-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  /* Fit the whole arena on screen under the game bar. */
+  width: min(100%, calc((100dvh - 230px) * 16 / 9));
+  min-width: min(100%, 560px);
+  margin-inline: auto;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #0b0820;
+  box-shadow:
+    0 0 0 3px var(--game-clash),
+    0 8px 0 var(--game-clash-ink);
+  color: #ffffff;
+}
+.clash-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: crosshair;
+}
+.clash-canvas:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
+}
+.clash-stage.full {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #0b0820;
+}
+.clash-stage.full .clash-frame {
+  aspect-ratio: auto;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+.clash-hud-top {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+  align-items: flex-start;
+  pointer-events: none;
+}
+.clash-power {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 280px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--t);
+  background: var(--clash-hud);
+  font: 700 13px/1.2 var(--font-body);
+}
+.clash-power.mine {
+  box-shadow: 0 0 0 2px #ffffff;
+}
+.clash-power-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.clash-power-name small {
+  font-weight: 600;
+  opacity: 0.8;
+}
+.clash-shape {
+  color: var(--t);
+  flex: none;
+}
+.clash-power-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.clash-power-bar i {
+  display: block;
+  height: 100%;
+  width: calc(var(--p) * 100%);
+  background: var(--t);
+  border-radius: inherit;
+  transition: width var(--duration-base);
+}
+.clash-power.lead .clash-power-bar i {
+  box-shadow: 0 0 10px var(--t);
+}
+.clash-clock {
+  flex: none;
+  padding: 2px 12px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--game-clash);
+  background: var(--clash-hud);
+  font: 800 20px/28px var(--font-display);
+}
+.clash-clock.urgent {
+  border-color: #ff5a4e;
+  color: #ffb3ac;
+}
+.clash-hud-mid {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.clash-titan {
+  width: min(360px, 46%);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px 10px;
+  border-radius: var(--radius-md);
+  background: var(--clash-hud);
+  border: 2px solid #ff3d6e;
+  font: 800 12px/1.2 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.clash-titan > span:first-child {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.clash-titan-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.clash-titan-bar i {
+  display: block;
+  height: 100%;
+  background: #ffd36b;
+  transition: width var(--duration-fast);
+}
+.clash-feed {
+  margin: 0;
+  padding: 0;
+  min-height: 26px;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  font: 600 13px/1.3 var(--font-body);
+}
+.clash-feed li {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--t);
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  animation: pop-in var(--duration-base) cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+}
+.clash-feed li.mine {
+  background: var(--game-clash-soft);
+  font-weight: 800;
+}
+.clash-stage.full .clash-feed {
+  display: none;
+}
+.clash-banner {
+  position: absolute;
+  top: 28%;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: 90%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--game-clash);
+  color: var(--on-game-clash);
+  box-shadow: 0 5px 0 var(--game-clash-ink);
+  font: 800 18px/1.25 var(--font-display);
+  text-align: center;
+  pointer-events: none;
+}
+.clash-down {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-1);
+  background: rgba(11, 8, 32, 0.45);
+  pointer-events: none;
+}
+.clash-down b {
+  font: 800 34px/1 var(--font-display);
+  color: #ff7a6e;
+  text-shadow: 0 3px 0 #0d0b1f;
+}
+.clash-me {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 4px 12px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--t, var(--game-clash));
+  background: var(--clash-hud);
+  font: 700 13px/1.2 var(--font-body);
+  pointer-events: none;
+}
+.clash-me-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.clash-hp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.clash-hp-bar {
+  width: 110px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.clash-hp-bar i {
+  display: block;
+  height: 100%;
+  background: #3fd08b;
+  transition: width var(--duration-fast);
+}
+.clash-hp-bar i.low {
+  background: #ff5a4e;
+}
+.clash-pts {
+  color: #ffd36b;
+}
+.clash-full {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  color: #ffffff;
+  background: var(--clash-hud);
+}
+.clash-rotate {
+  display: none;
+}
+@media (orientation: portrait) {
+  .clash-stage.full .clash-rotate {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: var(--space-3);
+    padding: var(--space-6);
+    background: #0b0820;
+    font: 800 22px/1.3 var(--font-display);
+    text-align: center;
+  }
+}
+.clash-help {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+}
+.clash-help kbd {
+  font: 700 12px/1 var(--font-mono, monospace);
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 3px;
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+@media (max-width: 720px) {
+  .clash-power {
+    grid-template-columns: auto auto;
+    padding: 2px 6px;
+    font-size: 11px;
+  }
+  .clash-power-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 6px;
+  }
+  .clash-clock {
+    font-size: 15px;
+    line-height: 22px;
+  }
+  .clash-me {
+    gap: var(--space-2);
+    font-size: 11px;
+  }
+  .clash-hp-bar {
+    width: 64px;
+  }
+}
+
+.clash-outcome-teams {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: var(--space-3);
+}
+.clash-outcome-team {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 2px solid var(--border);
+  border-top: 6px solid var(--t);
+  background: var(--surface-raised);
+}
+.clash-outcome-team.won {
+  border-color: var(--t);
+  box-shadow: 0 5px 0 var(--t);
+}
+.clash-outcome-team .clash-shape {
+  color: var(--t);
+}
+.clash-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.clash-stats th,
+.clash-stats td {
+  padding: 4px 6px;
+  text-align: right;
+  border-top: 1px solid var(--border);
+}
+.clash-stats th:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+.clash-stats thead th {
+  color: var(--ink-muted);
+  font-weight: 600;
+  border-top: 0;
+}
+.clash-stats tr.you th,
+.clash-stats tr.you td {
+  font-weight: 800;
 }
 :root[data-backdrop="tokyo"] .lobby-hero,
 :root[data-backdrop="tokyo"] .lobby-panel {

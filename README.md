@@ -1,6 +1,6 @@
 # Happy Hour (spotflow-games)
 
-Internal multiplayer games for the Spotflow team: Quiz Arena, Draw & Guess, and Two Truths and a Lie. Sign-in is limited to verified `spotflow.one` Google accounts.
+Internal multiplayer games for the Spotflow team: Quiz Arena, Draw & Guess, Two Truths and a Lie, and Core Clash. Sign-in is limited to verified `spotflow.one` Google accounts.
 
 ## Status
 
@@ -19,6 +19,10 @@ Milestone 2 is underway. **Quiz Arena** is playable: hosts pick one of the curat
 **Draw & Guess** is playable too. Hosts pick a word list, the time to draw and how many times everyone draws. Each drawer picks one of three words. Everyone else sees the drawing live and guesses. Letters are revealed as hints at 50% and 75% of the turn. The first correct guess earns 300 points, each later one 50 less (never under 100), and the drawer gets 50 per correct guess. Near misses show "So close" to the guesser only.
 
 **Two Truths and a Lie** is playable too. Hosts pick how many players are featured (picked at random), the time to write and the time to vote. Featured players write three statements and mark the lie, and can edit them until writing time ends. Each featured player then gets a round: the statements are shuffled, everyone else votes, and votes stay hidden until the reveal. Spotting the lie earns 100 points, and the featured player earns 50 for each person fooled. The host can close voting early or skip a round, and a skipped round scores nothing.
+
+**Core Clash** is a real-time, top-down team shooter. The host picks 2 to 4 teams, a Power target (60, 100 or 150) and a time limit (3, 5 or 8 minutes), and players are dealt into balanced teams. Teams fill a shared Power bar: a drone is worth 2, a player on another team 5, and the Titan boss, which wakes in the middle after 30 seconds, 25 to the team that did the most damage to it. The first team to the target wins, or the team with the most Power when time runs out. Personal points (50 a tag, 20 a drone, a share of 300 for Titan damage, and 200 each for the winning team) go to the leaderboard when the game ends. Controls are WASD or arrows, mouse aim and click to fire, and Space fires at the nearest enemy; phones play sideways with on-screen sticks.
+
+Real-time games stream held controls with `game:input`. Inputs skip the room lock: each one is a single Redis command into a per-room hash, and the game reads the latest ones on its 10-per-second tick (`ctx.inputs()`). Movement is predicted in the browser and checked against top speed and walls on the server; hits, damage and scoring happen on the server only.
 
 Custom quizzes and word lists, leaderboards, achievements, Slack and reminders come next.
 
