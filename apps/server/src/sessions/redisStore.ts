@@ -20,6 +20,12 @@ const key = {
 
 /** Deletes the lock only if we still hold it. */
 const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
+/**
+ * Takes the room's lock and, if that worked, reads the room and its inputs, all in one round trip.
+ * Returns nil when someone else holds the lock.
+ */
+const LOCK_AND_LOAD = `if not redis.call("set", KEYS[1], ARGV[1], "PX", ARGV[2], "NX") then return nil end
+return {redis.call("get", KEYS[2]) or "", redis.call("hgetall", KEYS[3])}`;
 /** Sets players' inputs and keeps the hash from outliving its room, in one command. */
 const SET_INPUTS = `redis.call("hset", KEYS[1], unpack(ARGV, 2)) return redis.call("pexpire", KEYS[1], ARGV[1])`;
 /** Inputs are short-lived: a game reads them every tick, and stale ones are ignored anyway. */
@@ -90,20 +96,22 @@ export class RedisRoomStore implements RoomStore {
   }
 
   async withRoom<T>(code: string, fn: (room: Room) => T | Promise<T>) {
-    const token = await this.lock(code);
+    const { token, raw, inputs } = await this.lockAndLoad(code);
     let room: Room | null = null;
+    let released = false;
     try {
-      const raw = await this.redis.get(key.room(code));
       if (!raw) return null;
       const log = new BufferedLog();
       room = this.builder.load(decode<RoomSnapshot>(raw), log);
-      if (room.acceptsInput && room.status === "in_progress") await this.loadInputs(room);
+      if (room.acceptsInput && room.status === "in_progress") this.loadInputs(room, inputs);
       const value = await fn(room);
-      await this.save(room, log);
+      // The lock is released in the same transaction that saves, saving a round trip.
+      await this.save(room, log, token);
+      released = true;
       return { value };
     } finally {
       room?.dispose();
-      await this.redis.eval(RELEASE, 1, key.lock(code), token).catch(() => {});
+      if (!released) await this.redis.eval(RELEASE, 1, key.lock(code), token).catch(() => {});
     }
   }
 
@@ -134,8 +142,9 @@ export class RedisRoomStore implements RoomStore {
     );
   }
 
-  private async loadInputs(room: Room) {
-    const all = await this.redis.hgetall(key.input(room.code));
+  private loadInputs(room: Room, flat: string[]) {
+    const all: Record<string, string> = {};
+    for (let i = 0; i + 1 < flat.length; i += 2) all[flat[i]!] = flat[i + 1]!;
     // Inputs this instance hasn't written yet are the newest.
     for (const [userId, raw] of this.pendingInputs.get(room.code) ?? []) all[userId] = raw;
     for (const [userId, raw] of Object.entries(all)) {
@@ -196,17 +205,26 @@ export class RedisRoomStore implements RoomStore {
     return roomInfo(room);
   }
 
-  private async lock(code: string) {
+  private async lockAndLoad(code: string) {
     const token = randomUUID();
     const deadline = Date.now() + this.o.lockWaitMs;
     for (;;) {
-      if ((await this.redis.set(key.lock(code), token, "PX", this.o.lockMs, "NX")) === "OK") return token;
+      const got = (await this.redis.eval(
+        LOCK_AND_LOAD,
+        3,
+        key.lock(code),
+        key.room(code),
+        key.input(code),
+        token,
+        this.o.lockMs,
+      )) as [string, string[]] | null;
+      if (got) return { token, raw: got[0], inputs: got[1] };
       if (Date.now() > deadline) throw new GameError("The game is busy right now. Try again.");
       await new Promise((r) => setTimeout(r, 5 + Math.random() * 20));
     }
   }
 
-  private async save(room: Room, log: BufferedLog) {
+  private async save(room: Room, log: BufferedLog, token: string) {
     const code = room.code;
     const tx = this.redis.multi();
     if (room.status === "cancelled") {
@@ -225,6 +243,7 @@ export class RedisRoomStore implements RoomStore {
       else tx.zadd(key.timers, due, code);
       this.wakeAt(code, due);
     }
+    tx.eval(RELEASE, 1, key.lock(code), token);
     await tx.exec();
     for (const send of log.sends) {
       const entries = (await this.redis.lrange(key.log(code), 0, -1)).map((e) => JSON.parse(e) as unknown);

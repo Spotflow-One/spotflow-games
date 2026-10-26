@@ -62,6 +62,8 @@ interface RaceState {
   goAt: number;
   endsAt: number;
   lastTick: number;
+  /** When the next tick was due. Ticks keep to this beat however long reaching the room took. */
+  beat?: number;
   nextN: number;
   nextSlickId: number;
   racers: Map<string, Racer>;
@@ -272,7 +274,8 @@ export function createRaceEngine() {
     state.slicks = state.slicks.filter((s) => now < s.until);
     checkFinish(ctx, state, feed);
     ctx.emitEvent(snapshot(ctx, state, feed));
-    ctx.setTimer("tick", R.tickMs);
+    state.beat = Math.max((state.beat ?? now) + R.tickMs, now + R.tickMs / 2);
+    ctx.setTimer("tick", state.beat - now);
   };
 
   const engine: GameEngine<RaceConfig, RaceState> = {
@@ -314,6 +317,7 @@ export function createRaceEngine() {
       }
       for (const id of order) addRacer(ctx, state, id);
       ctx.setTimer("end", state.endsAt - now);
+      state.beat = now + R.tickMs;
       ctx.setTimer("tick", R.tickMs);
       ctx.broadcastState();
       return state;
