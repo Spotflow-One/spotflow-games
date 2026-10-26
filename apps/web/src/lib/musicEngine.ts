@@ -32,7 +32,7 @@ const STABS = "x..x..x.x.....x.";
 export const TRACKS: Record<TrackName, Track> = {
   // Home page "Insert Coin": a minor groove, then the robot comes in.
   arcade: {
-    bpm: 104,
+    bpm: 118,
     sweep: [700, 3600],
     loop: [
       { chord: ["E4", "G4", "B4", "D5"], root: "E1" },
@@ -47,7 +47,7 @@ export const TRACKS: Record<TrackName, Track> = {
   },
   // Winner screen "High Score": a filter build, then a bright major loop.
   victory: {
-    bpm: 108,
+    bpm: 124,
     sweep: [1000, 5000],
     intro: [
       { chord: ["C4", "E4", "G4"], root: "C2", drums: "kick" },
