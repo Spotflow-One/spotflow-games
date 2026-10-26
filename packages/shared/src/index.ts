@@ -5,3 +5,4 @@ export * from "./session.js";
 export * from "./events.js";
 export * from "./quiz.js";
 export * from "./draw.js";
+export * from "./truths.js";

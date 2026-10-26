@@ -172,3 +172,26 @@ body,
     display: none;
   }
 }
+
+/* Two Truths and a Lie */
+.sg-progress.truths i {
+  background: var(--game-truths);
+}
+.sg-statement:disabled {
+  opacity: 1;
+}
+.sg-statement:not(:disabled):hover {
+  border-color: var(--game-truths);
+}
+.sg-statement:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--game-truths));
+  outline-offset: 2px;
+}
+.sg-statement .tag {
+  flex-wrap: wrap;
+}
+@media (max-width: 480px) {
+  .truths-author {
+    display: none;
+  }
+}

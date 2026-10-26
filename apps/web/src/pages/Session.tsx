@@ -20,6 +20,7 @@ import {
   type ParticipantView,
   type QuizView,
   type SessionView,
+  type TruthsView,
 } from "@spotflow-games/shared";
 import { useAuth } from "../lib/auth";
 import { usePreferences } from "../lib/preferences";
@@ -29,6 +30,7 @@ import { Avatar } from "../components/Avatar";
 import { GameIcon } from "../components/GameIcon";
 import { DrawScreen } from "../games/DrawScreen";
 import { QuizScreen } from "../games/QuizScreen";
+import { TruthsScreen } from "../games/TruthsScreen";
 
 type Conn = "connecting" | "connected" | "reconnecting";
 
@@ -177,13 +179,8 @@ export function Session() {
       {view.status === "in_progress" && view.game !== null && view.gameType === "draw" && (
         <DrawScreen session={view} game={view.game as DrawView} meId={me.id} onError={setNotice} />
       )}
-      {view.status === "in_progress" && view.gameType === "truths" && (
-        <div className="sg-card sg-stack">
-          <h2 className="sg-h3">Game in progress</h2>
-          <p className="sg-muted" style={{ margin: 0 }}>
-            The {info.name} screen is coming soon.
-          </p>
-        </div>
+      {view.status === "in_progress" && view.game !== null && view.gameType === "truths" && (
+        <TruthsScreen session={view} game={view.game as TruthsView} meId={me.id} onError={setNotice} />
       )}
 
       {(view.status === "results" || view.status === "completed") && <Results view={view} meId={me.id} />}
