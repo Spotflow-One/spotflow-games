@@ -820,6 +820,68 @@ a.sg-btn {
   outline: 3px solid #ffffff;
   outline-offset: -3px;
 }
+/* The 3D war zone is drawn underneath; names, crosshair and minimap on a flat layer over it. */
+.clash-overlay {
+  z-index: 1;
+}
+.clash-overlay.locked {
+  cursor: none;
+}
+.clash-frame > :not(canvas) {
+  z-index: 2;
+}
+.clash-nogl {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  margin: 0;
+  padding: var(--space-6);
+  background: #15151e;
+  font: 700 16px/1.4 var(--font-body);
+  text-align: center;
+}
+.clash-lock {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-2);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--clash-hud);
+  font: 700 13px/1.2 var(--font-body);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.clash-lock kbd {
+  font: 700 11px/1 var(--font-mono, monospace);
+  padding: 2px 5px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+.clash-fire {
+  position: absolute;
+  right: 24px;
+  bottom: 64px;
+  width: 84px;
+  height: 84px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 3px solid #ffffff;
+  background: rgba(255, 90, 78, 0.55);
+  color: #ffffff;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.clash-fire:active {
+  background: rgba(255, 90, 78, 0.85);
+  transform: scale(0.95);
+}
 .clash-stage.full {
   position: fixed;
   inset: 0;

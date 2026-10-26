@@ -1,34 +1,38 @@
 import { z } from "zod";
 
 /**
- * Core Clash: a real-time, top-down team shooter. Teams race to fill a shared Power bar by
- * knocking out drones, taking down the Titan boss, and tagging players on other teams.
- * Distances are in arena units on a 1600 x 900 board, scaled on each screen.
+ * Core Clash: a real-time, two-team shooter in a war zone, drawn in 3D from behind your soldier.
+ * Teams score by tagging the other team (and, with bots on, by taking down drones and the Titan).
+ *
+ * The simulation is flat: positions are (x, y) on a 2400 x 1400 ground plane, and shots fly
+ * level at chest height. Cover blocks have a height only for drawing; every one of them stops
+ * movement and shots.
  */
 export const CLASH_RULES = {
   /** How often the server simulates the arena and sends a snapshot. */
   tickMs: 100,
-  arena: { width: 1600, height: 900 },
+  arena: { width: 2400, height: 1400 },
 
   playerRadius: 18,
   /** Arena units per second. */
-  playerSpeed: 230,
+  playerSpeed: 260,
   playerHp: 100,
-  respawnMs: 3000,
-  spawnShieldMs: 1500,
-  fireCooldownMs: 220,
-  shotSpeed: 720,
-  shotRange: 620,
+  respawnMs: 4000,
+  spawnShieldMs: 2000,
+  fireCooldownMs: 160,
+  shotSpeed: 1100,
+  shotRange: 900,
   shotRadius: 5,
-  shotDamage: 18,
+  shotDamage: 20,
   /** Health comes back after a while out of combat, and faster at your own base. */
   regenDelayMs: 4000,
   regenPerSec: 8,
   baseHealPerSec: 30,
-  baseRadius: 90,
+  baseRadius: 110,
   /** Controls older than this are ignored, so a dropped player stops moving and shooting. */
   inputStaleMs: 1500,
 
+  /** Bots are optional. With them on, drones roam the war zone and a Titan wakes in the middle. */
   drone: {
     radius: 15,
     hp: 40,
@@ -36,12 +40,12 @@ export const CLASH_RULES = {
     contactDamage: 12,
     contactCooldownMs: 800,
     aggroRange: 420,
-    spawnEveryMs: 2500,
+    spawnEveryMs: 3000,
     /** Drones alive at once: base plus one per this many players, up to max. */
     baseCount: 3,
     playersPerExtra: 3,
     maxCount: 12,
-    power: 2,
+    power: 1,
     points: 20,
   },
   titan: {
@@ -51,33 +55,33 @@ export const CLASH_RULES = {
     maxHp: 2400,
     speed: 55,
     /** The Titan never strays further than this from the centre. */
-    leash: 240,
-    firstSpawnMs: 30_000,
-    respawnMs: 40_000,
+    leash: 260,
+    firstSpawnMs: 45_000,
+    respawnMs: 60_000,
     attackEveryMs: 2200,
     /** The Titan glows this long before an attack, so players can dodge. */
     telegraphMs: 500,
     ringShots: 12,
-    shotSpeed: 320,
+    shotSpeed: 360,
     shotDamage: 14,
     contactDamage: 25,
     contactCooldownMs: 1000,
-    /** Team Power for the team that did the most damage. */
-    power: 25,
+    /** Team score for the team that did the most damage. */
+    power: 5,
     /** Personal points shared among everyone who hit it, by damage. */
     pointsPool: 300,
   },
 
-  eliminationPower: 5,
+  /** Team score for tagging a player on the other team. */
+  eliminationPower: 1,
   eliminationPoints: 50,
   /** Personal points for each member of the winning team. */
   winBonus: 200,
 
-  defaultTeams: 2,
-  defaultTarget: 100,
+  teams: 2,
+  defaultTarget: 30,
   defaultMinutes: 5,
-  teamOptions: [2, 3, 4],
-  targetOptions: [60, 100, 150],
+  targetOptions: [20, 30, 50],
   minuteOptions: [3, 5, 8],
 } as const;
 
@@ -85,10 +89,10 @@ export const CLASH_RULES = {
 export const CLASH_TEAMS = [
   { name: "Blaze", shape: "circle" },
   { name: "Tide", shape: "square" },
-  { name: "Volt", shape: "triangle" },
-  { name: "Nova", shape: "diamond" },
 ] as const;
 export type ClashShape = (typeof CLASH_TEAMS)[number]["shape"];
+
+export type CoverKind = "building" | "wall" | "container" | "crate" | "sandbag";
 
 export interface Rect {
   x: number;
@@ -97,54 +101,117 @@ export interface Rect {
   h: number;
 }
 
-/** Cover blocks. The middle is left open for the Titan. */
-export const CLASH_WALLS: readonly Rect[] = [
-  { x: 380, y: 180, w: 40, h: 200 },
-  { x: 380, y: 520, w: 40, h: 200 },
-  { x: 1180, y: 180, w: 40, h: 200 },
-  { x: 1180, y: 520, w: 40, h: 200 },
-  { x: 700, y: 120, w: 200, h: 40 },
-  { x: 700, y: 740, w: 200, h: 40 },
-  { x: 590, y: 420, w: 60, h: 60 },
-  { x: 950, y: 420, w: 60, h: 60 },
+export interface Cover extends Rect {
+  kind: CoverKind;
+  /** How tall it is drawn. Every block stops movement and shots whatever its height. */
+  height: number;
+}
+
+const COVER_HEIGHT: Record<CoverKind, number> = { building: 170, wall: 90, container: 75, crate: 45, sandbag: 40 };
+const cover = (kind: CoverKind, x: number, y: number, w: number, h: number, height = COVER_HEIGHT[kind]): Cover => ({
+  kind,
+  x,
+  y,
+  w,
+  h,
+  height,
+});
+
+/** One half of the war zone, mirrored onto the other so neither team has the better side. */
+const HALF: Cover[] = [
+  cover("building", 480, 160, 240, 240),
+  cover("building", 480, 1000, 240, 240),
+  cover("wall", 880, 140, 40, 240),
+  cover("wall", 880, 1020, 40, 240),
+  cover("container", 820, 560, 60, 160),
+  cover("crate", 360, 580, 50, 50),
+  cover("crate", 360, 770, 50, 50),
+  cover("sandbag", 640, 640, 30, 120),
+  cover("crate", 1000, 420, 50, 50),
+  cover("crate", 1000, 930, 50, 50),
+  cover("sandbag", 260, 340, 120, 30),
+  cover("sandbag", 260, 1030, 120, 30),
 ];
 
-export const CLASH_CENTER = { x: 800, y: 450 } as const;
+/** Cover blocks. The plaza in the middle is left open for the Titan. */
+export const CLASH_WALLS: readonly Cover[] = [
+  ...HALF,
+  ...HALF.map((c) => ({ ...c, x: 2400 - c.x - c.w })),
+  cover("building", 1120, 50, 160, 150, 130),
+  cover("building", 1120, 1200, 160, 150, 130),
+  cover("sandbag", 1140, 330, 120, 30),
+  cover("sandbag", 1140, 1040, 120, 30),
+];
 
-/** Where drones appear, away from every base. */
+export const CLASH_CENTER = { x: 1200, y: 700 } as const;
+
+/** Where drones appear, away from both bases. */
 export const CLASH_DRONE_SPAWNS = [
-  { x: 800, y: 260 },
-  { x: 800, y: 640 },
-  { x: 520, y: 300 },
-  { x: 1080, y: 600 },
-  { x: 520, y: 600 },
-  { x: 1080, y: 300 },
+  { x: 1200, y: 480 },
+  { x: 1200, y: 920 },
+  { x: 780, y: 300 },
+  { x: 1620, y: 1100 },
+  { x: 780, y: 1100 },
+  { x: 1620, y: 300 },
 ] as const;
 
-/** Team bases: left and right for two teams, corners (or three of them plus the bottom) otherwise. */
-export function clashBases(teams: number): Array<{ x: number; y: number }> {
-  if (teams <= 2)
-    return [
-      { x: 110, y: 450 },
-      { x: 1490, y: 450 },
-    ];
-  if (teams === 3)
-    return [
-      { x: 110, y: 110 },
-      { x: 1490, y: 110 },
-      { x: 800, y: 835 },
-    ];
+/** Team bases, at either end of the war zone. */
+export function clashBases(_teams = 2): Array<{ x: number; y: number }> {
   return [
-    { x: 110, y: 110 },
-    { x: 1490, y: 110 },
-    { x: 110, y: 790 },
-    { x: 1490, y: 790 },
+    { x: 140, y: 700 },
+    { x: 2260, y: 700 },
   ];
 }
 
 export function pointInWall(x: number, y: number): boolean {
   for (const w of CLASH_WALLS) if (x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
   return false;
+}
+
+/**
+ * How far along the straight line from one point to another the first cover block is, from 0 to
+ * 1, or 1 if nothing is in the way. Blocks can be grown by `pad`, and ones shorter than
+ * `minHeight` left out.
+ */
+export function coverAlong(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  opts: { pad?: number; minHeight?: number } = {},
+): number {
+  const pad = opts.pad ?? 0;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  let best = 1;
+  for (const w of CLASH_WALLS) {
+    if (opts.minHeight && w.height < opts.minHeight) continue;
+    // Slab test of the segment against the block.
+    let t0 = 0;
+    let t1 = 1;
+    let hit = true;
+    for (const [p, q] of [
+      [-dx, x1 - (w.x - pad)],
+      [dx, w.x + w.w + pad - x1],
+      [-dy, y1 - (w.y - pad)],
+      [dy, w.y + w.h + pad - y1],
+    ] as const) {
+      if (p === 0) {
+        if (q < 0) hit = false;
+        continue;
+      }
+      const r = q / p;
+      if (p < 0) t0 = Math.max(t0, r);
+      else t1 = Math.min(t1, r);
+    }
+    if (hit && t0 <= t1 && t0 < best) best = t0;
+  }
+  return best;
+}
+
+/** Whether a straight line between two points crosses no cover, for line of sight. */
+export function lineClear(x1: number, y1: number, x2: number, y2: number): boolean {
+  return coverAlong(x1, y1, x2, y2) >= 1;
 }
 
 /**
@@ -185,9 +252,10 @@ export function resolveCircle(x: number, y: number, r: number): { x: number; y: 
 
 export const clashSessionConfigSchema = z
   .object({
-    teams: z.number().int().min(2).max(4).default(CLASH_RULES.defaultTeams),
-    target: z.number().int().min(20).max(300).default(CLASH_RULES.defaultTarget),
+    target: z.number().int().min(5).max(100).default(CLASH_RULES.defaultTarget),
     minutes: z.number().int().min(2).max(10).default(CLASH_RULES.defaultMinutes),
+    /** Drones and the Titan join the fight. */
+    bots: z.boolean().default(false),
   })
   .strict();
 export type ClashSessionConfig = z.input<typeof clashSessionConfigSchema>;
@@ -276,6 +344,8 @@ export interface ClashPlayerStats {
 /** Pushed with session state, on start, roster changes and at the end. Fast-moving data is in snapshots. */
 export interface ClashView {
   teamCount: number;
+  /** Whether drones and the Titan are in the fight. */
+  bots: boolean;
   target: number;
   durationSec: number;
   endsAt: number;
