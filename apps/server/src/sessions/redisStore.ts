@@ -20,10 +20,15 @@ const key = {
 
 /** Deletes the lock only if we still hold it. */
 const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
-/** Sets one player's input and keeps the hash from outliving its room, in one command. */
-const SET_INPUT = `redis.call("hset", KEYS[1], ARGV[1], ARGV[2]) return redis.call("pexpire", KEYS[1], ARGV[3])`;
+/** Sets players' inputs and keeps the hash from outliving its room, in one command. */
+const SET_INPUTS = `redis.call("hset", KEYS[1], unpack(ARGV, 2)) return redis.call("pexpire", KEYS[1], ARGV[1])`;
 /** Inputs are short-lived: a game reads them every tick, and stale ones are ignored anyway. */
 const INPUT_TTL_MS = 60_000;
+/**
+ * Inputs are written in batches this often, one command per room, so Redis traffic stays flat
+ * however many players are streaming controls. Well under a game tick.
+ */
+const INPUT_FLUSH_MS = 40;
 
 export interface RedisStoreOptions {
   /** How long a live room is kept without changes. */
@@ -61,6 +66,9 @@ class BufferedLog implements RoomLog {
  */
 export class RedisRoomStore implements RoomStore {
   private wakeups = new Map<string, NodeJS.Timeout>();
+  /** Inputs waiting for the next batch write, by room and then player. */
+  private pendingInputs = new Map<string, Map<string, string>>();
+  private inputFlush: NodeJS.Timeout | null = null;
   private poller: NodeJS.Timeout;
   private readonly o: Required<Omit<RedisStoreOptions, "log">>;
 
@@ -107,11 +115,29 @@ export class RedisRoomStore implements RoomStore {
   }
 
   async setInput(code: string, userId: string, input: { value: unknown; at: number }) {
-    await this.redis.eval(SET_INPUT, 1, key.input(code), userId, JSON.stringify(input), INPUT_TTL_MS);
+    let room = this.pendingInputs.get(code);
+    if (!room) this.pendingInputs.set(code, (room = new Map()));
+    room.set(userId, JSON.stringify(input));
+    this.inputFlush ??= setTimeout(() => void this.flushInputs(), INPUT_FLUSH_MS);
+  }
+
+  private async flushInputs() {
+    this.inputFlush = null;
+    const batch = this.pendingInputs;
+    this.pendingInputs = new Map();
+    await Promise.all(
+      [...batch].map(([code, inputs]) =>
+        this.redis
+          .eval(SET_INPUTS, 1, key.input(code), INPUT_TTL_MS, ...[...inputs].flat())
+          .catch((err) => this.opts.log?.error(`inputs for ${code} failed`, err)),
+      ),
+    );
   }
 
   private async loadInputs(room: Room) {
     const all = await this.redis.hgetall(key.input(room.code));
+    // Inputs this instance hasn't written yet are the newest.
+    for (const [userId, raw] of this.pendingInputs.get(room.code) ?? []) all[userId] = raw;
     for (const [userId, raw] of Object.entries(all)) {
       if (!room.participants.has(userId)) continue;
       try {
@@ -157,6 +183,9 @@ export class RedisRoomStore implements RoomStore {
 
   async close() {
     clearInterval(this.poller);
+    if (this.inputFlush) clearTimeout(this.inputFlush);
+    this.inputFlush = null;
+    this.pendingInputs.clear();
     for (const t of this.wakeups.values()) clearTimeout(t);
     this.wakeups.clear();
   }

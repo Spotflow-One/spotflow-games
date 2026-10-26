@@ -41,6 +41,12 @@
   --gi: var(--game-clash-ink);
   --go: var(--on-game-clash);
 }
+:root[data-arena="race"] {
+  --g: var(--game-race);
+  --gs: var(--game-race-soft);
+  --gi: var(--game-race-ink);
+  --go: var(--on-game-race);
+}
 :root[data-arena] .sg-screen {
   background:
     radial-gradient(circle at 1px 1px, var(--gs) 1.5px, transparent 0) 0 0 / 22px 22px,
@@ -525,6 +531,9 @@
 .confetti i.clash {
   background: var(--game-clash);
 }
+.confetti i.race {
+  background: var(--game-race);
+}
 .confetti i.primary {
   background: var(--primary);
 }
@@ -633,6 +642,10 @@
 .live-lobby.clash {
   --g: var(--game-clash);
   --go: var(--on-game-clash);
+}
+.live-lobby.race {
+  --g: var(--game-race);
+  --go: var(--on-game-race);
 }
 .live-lobby:hover {
   transform: translateY(-2px);
@@ -1155,4 +1168,458 @@ a.sg-btn {
   box-shadow:
     0 0 0 2px var(--g),
     0 0 32px var(--g);
+}
+
+/* Lagos Rush: a night-time neon city seen from above, with the HUD drawn over it. */
+:root[data-arena="race"][data-arena-status="in_progress"] .app-main {
+  max-width: 1280px;
+}
+.race-stage {
+  --race-hud: rgba(11, 8, 32, 0.8);
+  display: grid;
+  gap: var(--space-2);
+}
+.race-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: min(100%, calc((100dvh - 230px) * 16 / 9));
+  min-width: min(100%, 560px);
+  margin-inline: auto;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #0c0a1c;
+  box-shadow:
+    0 0 0 3px var(--game-race),
+    0 8px 0 var(--game-race-ink);
+  color: #ffffff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.race-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+.race-canvas:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
+}
+.race-stage.full {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #0c0a1c;
+}
+.race-stage.full .race-frame {
+  aspect-ratio: auto;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+.race-hud-top {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  right: 230px;
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  pointer-events: none;
+}
+.race-pos {
+  display: grid;
+  padding: 4px 14px 6px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--game-race);
+  background: var(--race-hud);
+  font: 700 13px/1.2 var(--font-body);
+}
+.race-pos b {
+  font: 800 40px/1 var(--font-display);
+  color: var(--game-race);
+  text-shadow: 0 3px 0 #0d0b1f;
+}
+.race-pos small {
+  font-size: 18px;
+  margin-left: 2px;
+}
+.race-mid {
+  flex: 1;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+.race-clock {
+  padding: 2px 12px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--game-race);
+  background: var(--race-hud);
+  font: 800 20px/28px var(--font-display);
+}
+.race-district {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #0f7a43;
+  border: 2px solid #ffffff;
+  font: 800 12px/1.4 var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.race-board {
+  position: absolute;
+  right: var(--space-2);
+  top: calc(min(190px, 24vw) * 0.93 + 30px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
+  border-radius: var(--radius-md);
+  background: var(--race-hud);
+  font: 600 12px/1.3 var(--font-body);
+  pointer-events: none;
+}
+.race-stage.full .race-board {
+  top: calc(min(190px, 24vw) * 0.93 + 30px);
+}
+.race-board li {
+  display: grid;
+  grid-template-columns: 18px 10px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.race-board li i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--c);
+  border: 1px solid #0d0b1f;
+}
+.race-board li.me {
+  background: var(--game-race);
+  color: var(--on-game-race);
+  font-weight: 800;
+}
+.race-count {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  pointer-events: none;
+}
+.race-count b {
+  font: 900 88px/1 var(--font-display);
+  color: #ffffff;
+  text-shadow:
+    0 5px 0 #0d0b1f,
+    0 0 24px var(--game-race);
+}
+.race-count.go b {
+  color: #3fd08b;
+}
+.race-lights {
+  display: flex;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #0d0b1f;
+  border: 2px solid #3a3256;
+}
+.race-lights i {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #3a1820;
+}
+.race-lights i.on {
+  background: #ff3d4e;
+  box-shadow: 0 0 16px #ff3d4e;
+}
+.race-lights i.go {
+  background: #3fd08b;
+  box-shadow: 0 0 16px #3fd08b;
+}
+.race-banner {
+  position: absolute;
+  top: 26%;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: 90%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--game-race);
+  color: var(--on-game-race);
+  box-shadow: 0 5px 0 var(--game-race-ink);
+  font: 800 20px/1.25 var(--font-display);
+  text-align: center;
+  pointer-events: none;
+}
+.race-wrong {
+  position: absolute;
+  top: 40%;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 18px;
+  border-radius: var(--radius-lg);
+  background: #ff3d4e;
+  color: #ffffff;
+  font: 900 26px/1 var(--font-display);
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.race-dash {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.race-dash.touch {
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  flex-direction: column;
+  align-items: flex-start;
+}
+.race-speed {
+  padding: 4px 12px;
+  border-radius: var(--radius-md);
+  background: var(--race-hud);
+  border: 2px solid #4fe3ff;
+  font: 800 26px/1 var(--font-display);
+  pointer-events: none;
+}
+.race-speed small {
+  margin-left: 4px;
+  font: 700 12px/1 var(--font-body);
+  opacity: 0.8;
+}
+.race-item {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  border: 2px dashed rgba(255, 255, 255, 0.35);
+  background: var(--race-hud);
+  color: rgba(255, 255, 255, 0.45);
+  font: 900 24px/1 var(--font-display);
+  touch-action: none;
+}
+.race-item.ready {
+  border: 3px solid var(--game-race);
+  color: var(--game-race);
+  box-shadow: 0 0 16px var(--game-race);
+  cursor: pointer;
+}
+.race-pads {
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: var(--space-3);
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.race-pad-group {
+  display: flex;
+  gap: var(--space-3);
+}
+.race-pad {
+  width: 84px;
+  height: 84px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.45);
+  background: rgba(11, 8, 32, 0.55);
+  color: #ffffff;
+  font: 800 15px/1 var(--font-display);
+  text-transform: uppercase;
+  touch-action: none;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+.race-pad:active {
+  background: rgba(255, 255, 255, 0.25);
+}
+.race-pad.brake {
+  border-color: #ff5a4e;
+}
+.race-full {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  color: #ffffff;
+  background: var(--race-hud);
+}
+.race-pads ~ .race-full {
+  bottom: auto;
+  top: 50%;
+}
+.race-rotate {
+  display: none;
+}
+@media (orientation: portrait) {
+  .race-stage.full .race-rotate {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: var(--space-3);
+    padding: var(--space-6);
+    background: #0c0a1c;
+    font: 800 22px/1.3 var(--font-display);
+    text-align: center;
+  }
+}
+.race-watch {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.race-watch .sg-btn[aria-pressed="true"] {
+  background: var(--game-race-soft);
+  color: var(--game-race-ink);
+}
+.race-feed {
+  margin: 0;
+  padding: 0;
+  min-height: 26px;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  font: 600 13px/1.3 var(--font-body);
+}
+.race-feed li {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--c);
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  animation: pop-in var(--duration-base) cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+}
+.race-feed li.mine {
+  background: var(--game-race-soft);
+  font-weight: 800;
+}
+.race-stage.full .race-feed,
+.race-stage.full .race-watch {
+  display: none;
+}
+.race-help {
+  margin: 0;
+  font-size: 14px;
+  text-align: center;
+}
+.race-help kbd {
+  font: 700 12px/1 var(--font-mono, monospace);
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 3px;
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+@media (max-width: 720px), (max-height: 480px) {
+  .race-hud-top {
+    right: 150px;
+  }
+  .race-pos b {
+    font-size: 28px;
+  }
+  .race-clock {
+    font-size: 15px;
+    line-height: 22px;
+  }
+  .race-board {
+    font-size: 11px;
+    min-width: 110px;
+  }
+  .race-board li:nth-child(n + 4):not(.me) {
+    display: none;
+  }
+  .race-count b {
+    font-size: 60px;
+  }
+  .race-speed {
+    font-size: 20px;
+  }
+  .race-pad {
+    width: 70px;
+    height: 70px;
+  }
+}
+
+.race-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.race-stats th,
+.race-stats td {
+  padding: 5px 8px;
+  text-align: right;
+  border-top: 1px solid var(--border);
+}
+.race-stats th[scope="row"],
+.race-stats thead th:nth-child(2) {
+  text-align: left;
+  font-weight: 600;
+}
+.race-stats td:first-child,
+.race-stats thead th:first-child {
+  text-align: left;
+  width: 3em;
+}
+.race-stats thead th {
+  color: var(--ink-muted);
+  font-weight: 600;
+  border-top: 0;
+}
+.race-stats tr.you th,
+.race-stats tr.you td {
+  font-weight: 800;
+}
+.race-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: 3px;
+  border: 1px solid var(--ink);
+  vertical-align: baseline;
+}
+.race-pad-group .race-item {
+  width: 70px;
+  height: 70px;
+  align-self: center;
+  pointer-events: auto;
 }

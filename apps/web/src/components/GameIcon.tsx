@@ -1,4 +1,4 @@
-import { CircleHelp, Crosshair, MessageSquareText, Pencil } from "lucide-react";
+import { CarFront, CircleHelp, Crosshair, MessageSquareText, Pencil } from "lucide-react";
 import type { GameType } from "@spotflow-games/shared";
 
 export function GameIcon({ type, size = 20 }: { type: GameType; size?: number }) {
@@ -6,5 +6,6 @@ export function GameIcon({ type, size = 20 }: { type: GameType; size?: number })
   if (type === "draw") return <Pencil {...props} />;
   if (type === "truths") return <MessageSquareText {...props} />;
   if (type === "clash") return <Crosshair {...props} />;
+  if (type === "race") return <CarFront {...props} />;
   return <CircleHelp {...props} />;
 }

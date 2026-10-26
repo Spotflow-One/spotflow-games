@@ -8,6 +8,7 @@ import {
   TRUTHS_RULES,
   CLASH_RULES,
   CLASH_TEAMS,
+  RACE_RULES,
   type GameType,
   type WordListSummary,
   type QuizSummary,
@@ -49,6 +50,7 @@ export function HostSetup() {
   const [teams, setTeams] = useState<number>(CLASH_RULES.defaultTeams);
   const [target, setTarget] = useState<number>(CLASH_RULES.defaultTarget);
   const [minutes, setMinutes] = useState<number>(CLASH_RULES.defaultMinutes);
+  const [laps, setLaps] = useState<number>(RACE_RULES.defaultLaps);
   const [hostPlays, setHostPlays] = useState(true);
   const [allowLateJoin, setAllowLateJoin] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -90,7 +92,9 @@ export function HostSetup() {
           ? { wordListId, turnSec, rounds }
           : gameType === "clash"
             ? { teams, target, minutes }
-            : { featuredCount, voteSec, writeSec };
+            : gameType === "race"
+              ? { laps }
+              : { featuredCount, voteSec, writeSec };
     try {
       const s = await api<SessionSummary>("/api/sessions", {
         method: "POST",
@@ -311,6 +315,34 @@ export function HostSetup() {
             </div>
             <span className="sg-muted" style={{ fontSize: 14 }}>
               If no team reaches the target in time, the team with the most Power wins.
+            </span>
+          </div>
+        </section>
+      )}
+
+      {gameType === "race" && (
+        <section className="sg-card sg-stack" aria-labelledby="race-settings">
+          <h2 id="race-settings" className="sg-h3">
+            How it plays
+          </h2>
+          <p className="sg-muted" style={{ margin: 0 }}>
+            Up to {RACE_RULES.maxRacers} drivers race from Lekki Toll Gate through Ozumba Mbadiwe, over Third Mainland
+            Bridge, through Oshodi market and back. Dodge danfos that pull over without warning, weaving okadas,
+            potholes, market stalls, police checkpoints and the go-slow on the bridge. Grab boxes for nitro or oil.
+            Points go by finishing place, with a bonus for clean driving. Phones play sideways with on-screen pedals.
+          </p>
+          <div className="sg-field">
+            <label id="lap-count">Laps</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="lap-count">
+              {RACE_RULES.lapOptions.map((n) => (
+                <button type="button" key={n} role="radio" aria-checked={laps === n} onClick={() => setLaps(n)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            <span className="sg-muted" style={{ fontSize: 14 }}>
+              A lap takes about a minute. Once the winner crosses the line, everyone else has{" "}
+              {RACE_RULES.finishGraceMs / 1000} seconds to finish.
             </span>
           </div>
         </section>
