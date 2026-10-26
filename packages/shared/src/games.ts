@@ -8,7 +8,7 @@ export const GAME_INFO: Record<GameType, { name: string; tagline: string; minPla
   clash: { name: "Core Clash", tagline: "Team up, blast bots, beat the other teams", minPlayers: 2 },
   race: {
     name: "Lagos Rush",
-    tagline: "Race the streets of Lagos and Third Mainland Bridge",
+    tagline: "A 3D Grand Prix through Lagos and over Third Mainland Bridge",
     minPlayers: 1,
     maxPlayers: 30,
   },
