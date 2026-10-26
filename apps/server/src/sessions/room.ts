@@ -5,7 +5,10 @@ import { rankPlayers } from "./ranking.js";
 
 export interface RoomParticipant {
   userId: string;
+  /** The alias if one is set, otherwise the account's display name. */
   displayName: string;
+  /** Name picked for this session only. Never saved to the account. */
+  alias?: string | null;
   avatar: AvatarConfig | null;
   socketIds: Set<string>;
   score: number;
@@ -194,15 +197,22 @@ export class Room {
 
   /**
    * Join or reconnect. The same account always maps to one participant, so opening a
-   * second tab or reconnecting never creates a duplicate.
+   * second tab or reconnecting never creates a duplicate. `alias` replaces the player's
+   * alias for this session; undefined keeps the one they already picked.
    */
-  join(user: { id: string; displayName: string; avatar: AvatarConfig | null }, socketId: string, maxPlayers: number) {
+  join(
+    user: { id: string; displayName: string; avatar: AvatarConfig | null },
+    socketId: string,
+    maxPlayers: number,
+    alias?: string | null,
+  ) {
     this.touch();
     if (this.removed.has(user.id)) throw new GameError("You were removed from this session");
     const existing = this.participants.get(user.id);
     if (existing) {
       existing.socketIds.add(socketId);
-      existing.displayName = user.displayName;
+      if (alias !== undefined) existing.alias = alias;
+      existing.displayName = existing.alias || user.displayName;
       existing.avatar = user.avatar;
       this.broadcast();
       return { reconnected: true };
@@ -212,7 +222,8 @@ export class Room {
     if (this.participants.size >= maxPlayers) throw new GameError("This session is full");
     this.participants.set(user.id, {
       userId: user.id,
-      displayName: user.displayName,
+      displayName: alias || user.displayName,
+      alias: alias ?? null,
       avatar: user.avatar,
       socketIds: new Set([socketId]),
       score: 0,
