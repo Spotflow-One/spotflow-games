@@ -2,9 +2,14 @@
  * Small synthesized sound effects, so there are no audio files to load.
  * Browsers only allow audio after a user gesture, so the context is created lazily.
  */
-type Effect = "countdown" | "correct" | "complete" | "winner";
+type Effect = "countdown" | "correct" | "complete" | "winner" | "zap" | "boom";
 
 const NOTES: Record<Effect, Array<[freq: number, start: number, dur: number]>> = {
+  zap: [[1320, 0, 0.04]],
+  boom: [
+    [180, 0, 0.18],
+    [110, 0.08, 0.3],
+  ],
   countdown: [[660, 0, 0.12]],
   correct: [
     [660, 0, 0.1],

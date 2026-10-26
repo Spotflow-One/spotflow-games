@@ -18,6 +18,7 @@ const DESCRIPTIONS: Record<GameType, string> = {
   quiz: "Timed multiple-choice rounds. Fastest right answer scores most.",
   draw: "One player draws, everyone else races to guess the word.",
   truths: "Featured players share three statements. Spot the lie.",
+  clash: "Split into teams, take down drones and the Titan, and outgun the other side.",
 };
 
 export function Home() {

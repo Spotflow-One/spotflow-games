@@ -249,7 +249,11 @@ export function redisBus(pub: Redis, sub: Redis, local: Transport, log?: Pick<Co
     | { t: "event"; ids: string[]; code: string; event: unknown }
     | { t: "closed"; ids: string[]; code: string; reason: string };
 
-  void sub.subscribe(channel);
+  // Subscribing before the connection is ready races ioredis's ready check (it sends INFO on a
+  // connection already in subscriber mode), which leaves nothing subscribed. Wait for ready.
+  const subscribe = () => void sub.subscribe(channel).catch((err) => log?.error("subscribe failed", err));
+  if (sub.status === "ready") subscribe();
+  else sub.once("ready", subscribe);
   sub.on("message", (ch: string, raw: string) => {
     if (ch !== channel) return;
     try {

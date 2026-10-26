@@ -6,6 +6,8 @@ import {
   DRAW_RULES,
   QUIZ_RULES,
   TRUTHS_RULES,
+  CLASH_RULES,
+  CLASH_TEAMS,
   type GameType,
   type WordListSummary,
   type QuizSummary,
@@ -44,6 +46,9 @@ export function HostSetup() {
   const [featuredCount, setFeaturedCount] = useState<number>(TRUTHS_RULES.defaultFeatured);
   const [voteSec, setVoteSec] = useState<number>(TRUTHS_RULES.defaultVoteSec);
   const [writeSec, setWriteSec] = useState<number>(TRUTHS_RULES.defaultWriteSec);
+  const [teams, setTeams] = useState<number>(CLASH_RULES.defaultTeams);
+  const [target, setTarget] = useState<number>(CLASH_RULES.defaultTarget);
+  const [minutes, setMinutes] = useState<number>(CLASH_RULES.defaultMinutes);
   const [hostPlays, setHostPlays] = useState(true);
   const [allowLateJoin, setAllowLateJoin] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -83,7 +88,9 @@ export function HostSetup() {
         ? { quizId, timeLimitSec, shuffleQuestions, shuffleOptions }
         : gameType === "draw"
           ? { wordListId, turnSec, rounds }
-          : { featuredCount, voteSec, writeSec };
+          : gameType === "clash"
+            ? { teams, target, minutes }
+            : { featuredCount, voteSec, writeSec };
     try {
       const s = await api<SessionSummary>("/api/sessions", {
         method: "POST",
@@ -252,6 +259,59 @@ export function HostSetup() {
                 </button>
               ))}
             </div>
+          </div>
+        </section>
+      )}
+
+      {gameType === "clash" && (
+        <section className="sg-card sg-stack" aria-labelledby="clash-settings">
+          <h2 id="clash-settings" className="sg-h3">
+            How it plays
+          </h2>
+          <p className="sg-muted" style={{ margin: 0 }}>
+            Players are split into teams at the start. Each team fills a Power bar by knocking out drones (+
+            {CLASH_RULES.drone.power}), taking down the Titan boss (+{CLASH_RULES.titan.power} to the team that hits it
+            hardest) and tagging players on other teams (+{CLASH_RULES.eliminationPower}). Best on a laptop; phones play
+            sideways with on-screen sticks.
+          </p>
+          <div className="sg-field">
+            <label id="team-count">Teams</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="team-count">
+              {CLASH_RULES.teamOptions.map((n) => (
+                <button type="button" key={n} role="radio" aria-checked={teams === n} onClick={() => setTeams(n)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            <span className="sg-muted" style={{ fontSize: 14 }}>
+              {CLASH_TEAMS.slice(0, teams)
+                .map((t) => t.name)
+                .join(" vs ")}
+              . Teams are balanced automatically, and never outnumber the players.
+            </span>
+          </div>
+          <div className="sg-field">
+            <label id="power-target">Power to win</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="power-target">
+              {CLASH_RULES.targetOptions.map((n) => (
+                <button type="button" key={n} role="radio" aria-checked={target === n} onClick={() => setTarget(n)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sg-field">
+            <label id="match-length">Time limit</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="match-length">
+              {CLASH_RULES.minuteOptions.map((n) => (
+                <button type="button" key={n} role="radio" aria-checked={minutes === n} onClick={() => setMinutes(n)}>
+                  {n} min
+                </button>
+              ))}
+            </div>
+            <span className="sg-muted" style={{ fontSize: 14 }}>
+              If no team reaches the target in time, the team with the most Power wins.
+            </span>
           </div>
         </section>
       )}
