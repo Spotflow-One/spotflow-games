@@ -12,6 +12,7 @@ import { GameError } from "./games/contract.js";
 import { createDrawEngine } from "./games/draw/engine.js";
 import { curatedWordSource, type WordSource } from "./games/draw/words.js";
 import { createQuizEngine } from "./games/quiz/engine.js";
+import { createTruthsEngine } from "./games/truths/engine.js";
 import { curatedQuizSource, type QuizSource } from "./games/quiz/library.js";
 import { GameRegistry } from "./games/registry.js";
 import { createGateway } from "./realtime/gateway.js";
@@ -33,7 +34,11 @@ export async function buildApp(
   const quizSource = opts.quizSource ?? curatedQuizSource;
   const wordSource = opts.wordSource ?? curatedWordSource;
   const registry =
-    opts.registry ?? new GameRegistry().register(createQuizEngine(quizSource)).register(createDrawEngine(wordSource));
+    opts.registry ??
+    new GameRegistry()
+      .register(createQuizEngine(quizSource))
+      .register(createDrawEngine(wordSource))
+      .register(createTruthsEngine());
   const google = new GoogleAuth(config);
   const manager = new SessionManager(db, registry, {
     lobbyExpiryMs: config.LOBBY_EXPIRY_MINUTES * 60_000,

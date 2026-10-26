@@ -5,6 +5,7 @@ import {
   GAME_TYPES,
   DRAW_RULES,
   QUIZ_RULES,
+  TRUTHS_RULES,
   type GameType,
   type WordListSummary,
   type QuizSummary,
@@ -15,6 +16,8 @@ import { GameIcon } from "../components/GameIcon";
 
 const TIME_LIMITS = [10, 20, 30, 45, 60];
 const TURN_LENGTHS = [45, 60, 80, 100, 120];
+const VOTE_LENGTHS = [15, 30, 45, 60];
+const WRITE_LENGTHS = [60, 120, 180, 300];
 
 function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -38,6 +41,9 @@ export function HostSetup() {
   const [wordListId, setWordListId] = useState<string | null>(null);
   const [turnSec, setTurnSec] = useState<number>(DRAW_RULES.defaultTurnSec);
   const [rounds, setRounds] = useState(1);
+  const [featuredCount, setFeaturedCount] = useState<number>(TRUTHS_RULES.defaultFeatured);
+  const [voteSec, setVoteSec] = useState<number>(TRUTHS_RULES.defaultVoteSec);
+  const [writeSec, setWriteSec] = useState<number>(TRUTHS_RULES.defaultWriteSec);
   const [hostPlays, setHostPlays] = useState(true);
   const [allowLateJoin, setAllowLateJoin] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -77,7 +83,7 @@ export function HostSetup() {
         ? { quizId, timeLimitSec, shuffleQuestions, shuffleOptions }
         : gameType === "draw"
           ? { wordListId, turnSec, rounds }
-          : {};
+          : { featuredCount, voteSec, writeSec };
     try {
       const s = await api<SessionSummary>("/api/sessions", {
         method: "POST",
@@ -192,6 +198,57 @@ export function HostSetup() {
               {[1, 2, 3].map((r) => (
                 <button type="button" key={r} role="radio" aria-checked={rounds === r} onClick={() => setRounds(r)}>
                   {r}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {gameType === "truths" && (
+        <section className="sg-card sg-stack" aria-labelledby="truths-settings">
+          <h2 id="truths-settings" className="sg-h3">
+            How it plays
+          </h2>
+          <p className="sg-muted" style={{ margin: 0 }}>
+            Some players are picked at random to write two truths and a lie. Everyone else votes on which one is the
+            lie.
+          </p>
+          <div className="sg-field">
+            <label id="featured-count">Featured players</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="featured-count">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <button
+                  type="button"
+                  key={n}
+                  role="radio"
+                  aria-checked={featuredCount === n}
+                  onClick={() => setFeaturedCount(n)}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            <span className="sg-muted" style={{ fontSize: 14 }}>
+              If fewer people join, everyone is featured.
+            </span>
+          </div>
+          <div className="sg-field">
+            <label id="write-length">Time to write</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="write-length">
+              {WRITE_LENGTHS.map((t) => (
+                <button type="button" key={t} role="radio" aria-checked={writeSec === t} onClick={() => setWriteSec(t)}>
+                  {t / 60} min
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sg-field">
+            <label id="vote-length">Time to vote</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="vote-length">
+              {VOTE_LENGTHS.map((t) => (
+                <button type="button" key={t} role="radio" aria-checked={voteSec === t} onClick={() => setVoteSec(t)}>
+                  {t}s
                 </button>
               ))}
             </div>

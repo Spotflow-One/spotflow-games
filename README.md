@@ -18,7 +18,9 @@ Milestone 2 is underway. **Quiz Arena** is playable: hosts pick one of the curat
 
 **Draw & Guess** is playable too. Hosts pick a word list, the time to draw and how many times everyone draws. Each drawer picks one of three words. Everyone else sees the drawing live and guesses. Letters are revealed as hints at 50% and 75% of the turn. The first correct guess earns 300 points, each later one 50 less (never under 100), and the drawer gets 50 per correct guess. Near misses show "So close" to the guesser only.
 
-Two Truths and a Lie, custom quizzes and word lists, leaderboards, achievements, Slack and reminders come next.
+**Two Truths and a Lie** is playable too. Hosts pick how many players are featured (picked at random), the time to write and the time to vote. Featured players write three statements and mark the lie, and can edit them until writing time ends. Each featured player then gets a round: the statements are shuffled, everyone else votes, and votes stay hidden until the reveal. Spotting the lie earns 100 points, and the featured player earns 50 for each person fooled. The host can close voting early or skip a round, and a skipped round scores nothing.
+
+Custom quizzes and word lists, leaderboards, achievements, Slack and reminders come next.
 
 ## Layout
 
