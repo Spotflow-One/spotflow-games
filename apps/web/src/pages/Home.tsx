@@ -5,6 +5,7 @@ import { Play } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { GameIcon } from "../components/GameIcon";
+import { TokyoRun } from "../components/TokyoRun";
 
 interface GameListing {
   type: GameType;
@@ -35,7 +36,7 @@ export function Home() {
     return () => clearInterval(t);
   }, []);
 
-  // The home page sits on the arcade backdrop.
+  // The home page sits on the Tokyo racing backdrop.
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.page = "home";
@@ -53,7 +54,7 @@ export function Home() {
 
   return (
     <>
-      <ArcadeBackdrop />
+      <TokyoRun />
       <section className="home-hero">
         <div className="sg-stack" style={{ gap: "var(--space-2)" }}>
           <span className="sg-eyebrow">It's Happy Hour</span>
@@ -90,6 +91,8 @@ export function Home() {
           )}
         </form>
       </section>
+
+      <div className="race-lane" aria-hidden="true" />
 
       {lobbies.length > 0 && (
         <section className="sg-stack" aria-labelledby="open-lobbies">
@@ -149,43 +152,5 @@ export function Home() {
         </div>
       </section>
     </>
-  );
-}
-
-/** Shapes drifting over the backdrop: the quiz answer shapes, so the home page hints at play. */
-const FLOATERS = [
-  { shape: "tri", left: 6, top: 22, size: 34, delay: 0 },
-  { shape: "dia", left: 88, top: 16, size: 28, delay: 1.2 },
-  { shape: "cir", left: 14, top: 64, size: 22, delay: 2.1 },
-  { shape: "sq", left: 80, top: 58, size: 30, delay: 0.6 },
-  { shape: "dia", left: 46, top: 8, size: 18, delay: 2.8 },
-  { shape: "cir", left: 94, top: 38, size: 16, delay: 1.7 },
-] as const;
-
-const SHAPE_PATHS = {
-  tri: <path d="M12 3l10 18H2z" />,
-  dia: <path d="M12 2l10 10-10 10L2 12z" />,
-  cir: <circle cx="12" cy="12" r="10" />,
-  sq: <rect x="3" y="3" width="18" height="18" rx="3" />,
-};
-
-/** Decorative arcade scene behind the home page: night sky, stars, a neon horizon and a moving grid floor. */
-function ArcadeBackdrop() {
-  return (
-    <div className="arcade-bg" aria-hidden="true">
-      <div className="arcade-stars" />
-      <div className="arcade-sun" />
-      <div className="arcade-floor" />
-      {FLOATERS.map((f, i) => (
-        <svg
-          key={i}
-          className={`arcade-floater ${f.shape}`}
-          viewBox="0 0 24 24"
-          style={{ left: `${f.left}%`, top: `${f.top}%`, width: f.size, height: f.size, animationDelay: `${f.delay}s` }}
-        >
-          {SHAPE_PATHS[f.shape]}
-        </svg>
-      ))}
-    </div>
   );
 }
