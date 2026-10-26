@@ -37,6 +37,13 @@ export interface GameContext {
   clearLog(): void;
   /** Send the whole log to one player, wrapped as an event (e.g. to catch up after a reconnect). */
   sendLog(userId: string, wrap: (entries: unknown[]) => unknown): void;
+  /**
+   * Each player's latest held controls (movement, aim) sent with `game:input`, for games that
+   * set `acceptsInput`. Inputs skip the room lock, so streaming them never queues behind other
+   * changes. The latest one wins; `at` is when the server received it. Values are raw client
+   * data, so validate them.
+   */
+  inputs(): ReadonlyMap<string, { value: unknown; at: number }>;
   /** End gameplay and move the session to results. */
   finish(): void;
 }
@@ -79,6 +86,13 @@ export interface GameEngine<Config = unknown, State = unknown> {
   onPlayerRemoved?(ctx: GameContext, state: State, userId: string): void;
   /** A timer set with `ctx.setTimer` is due. */
   onTimer?(ctx: GameContext, state: State, name: string): void;
+  /**
+   * Gameplay is ending, for any reason: the game finished, the host ended it, or it was
+   * abandoned. The last chance to award points before results are saved.
+   */
+  onEnd?(ctx: GameContext, state: State): void;
+  /** Whether players stream held controls with `game:input`, read with `ctx.inputs()`. */
+  readonly acceptsInput?: boolean;
   /** Allowed actions per second per player. Defaults to 5. */
   readonly actionRateLimit?: number;
 }

@@ -14,6 +14,11 @@ export interface ClientToServerEvents {
   "session:kick": (payload: { code: string; userId: string }, ack: Ack) => void;
   /** Game-specific action, validated by the game engine. */
   "game:action": (payload: { code: string; action: unknown }, ack: Ack) => void;
+  /**
+   * Held controls for real-time games, such as movement and aim. Sent often and never
+   * acknowledged: the latest one wins, and the game reads it on its next tick.
+   */
+  "game:input": (payload: { code: string; input: unknown }) => void;
 }
 
 export interface ServerToClientEvents {

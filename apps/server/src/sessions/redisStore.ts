@@ -9,6 +9,8 @@ import { roomInfo, type RoomInfo, type RoomStore } from "./store.js";
 const key = {
   room: (code: string) => `sg:room:${code}`,
   log: (code: string) => `sg:log:${code}`,
+  /** Hash of each player's latest held controls (see GameContext.inputs). */
+  input: (code: string) => `sg:input:${code}`,
   lock: (code: string) => `sg:lock:${code}`,
   job: (name: string) => `sg:job:${name}`,
   rooms: "sg:rooms",
@@ -18,6 +20,10 @@ const key = {
 
 /** Deletes the lock only if we still hold it. */
 const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
+/** Sets one player's input and keeps the hash from outliving its room, in one command. */
+const SET_INPUT = `redis.call("hset", KEYS[1], ARGV[1], ARGV[2]) return redis.call("pexpire", KEYS[1], ARGV[3])`;
+/** Inputs are short-lived: a game reads them every tick, and stale ones are ignored anyway. */
+const INPUT_TTL_MS = 60_000;
 
 export interface RedisStoreOptions {
   /** How long a live room is kept without changes. */
@@ -83,6 +89,7 @@ export class RedisRoomStore implements RoomStore {
       if (!raw) return null;
       const log = new BufferedLog();
       room = this.builder.load(decode<RoomSnapshot>(raw), log);
+      if (room.acceptsInput && room.status === "in_progress") await this.loadInputs(room);
       const value = await fn(room);
       await this.save(room, log);
       return { value };
@@ -97,6 +104,22 @@ export class RedisRoomStore implements RoomStore {
     if (ok !== "OK") return false;
     await this.redis.sadd(key.rooms, room.code);
     return true;
+  }
+
+  async setInput(code: string, userId: string, input: { value: unknown; at: number }) {
+    await this.redis.eval(SET_INPUT, 1, key.input(code), userId, JSON.stringify(input), INPUT_TTL_MS);
+  }
+
+  private async loadInputs(room: Room) {
+    const all = await this.redis.hgetall(key.input(room.code));
+    for (const [userId, raw] of Object.entries(all)) {
+      if (!room.participants.has(userId)) continue;
+      try {
+        room.inputs.set(userId, JSON.parse(raw) as { value: unknown; at: number });
+      } catch {
+        /* ignore a malformed entry */
+      }
+    }
   }
 
   async info(code: string) {
@@ -118,7 +141,13 @@ export class RedisRoomStore implements RoomStore {
   }
 
   async expireAfter(code: string, ms: number) {
-    await this.redis.multi().pexpire(key.room(code), ms).pexpire(key.log(code), ms).zrem(key.timers, code).exec();
+    await this.redis
+      .multi()
+      .pexpire(key.room(code), ms)
+      .pexpire(key.log(code), ms)
+      .del(key.input(code))
+      .zrem(key.timers, code)
+      .exec();
   }
 
   async exclusive(name: string, ttlMs: number, fn: () => Promise<void>) {
@@ -152,7 +181,7 @@ export class RedisRoomStore implements RoomStore {
     const code = room.code;
     const tx = this.redis.multi();
     if (room.status === "cancelled") {
-      tx.del(key.room(code), key.log(code)).srem(key.rooms, code).zrem(key.timers, code);
+      tx.del(key.room(code), key.log(code), key.input(code)).srem(key.rooms, code).zrem(key.timers, code);
     } else {
       const ended = room.status === "results" || room.status === "completed";
       const ttl = ended ? this.o.resultsTtlMs : this.o.roomTtlMs;

@@ -45,6 +45,9 @@ export function createGateway(server: HttpServer, opts: GatewayOptions) {
   const limiter = new RateLimiter();
   // Per-socket ceiling for game actions; each game applies its own lower rate inside.
   const maxActionRate = 50;
+  // Real-time controls: about 15 a second from a moving player, kept small.
+  const maxInputRate = 25;
+  const maxInputBytes = 200;
 
   const local: Transport = {
     sendStates: (_code, views) => {
@@ -74,7 +77,8 @@ export function createGateway(server: HttpServer, opts: GatewayOptions) {
   io.on("connection", (socket: GameSocket) => {
     const user = socket.data.user;
     socket.join(userRoom(user.id));
-    const joined = new Set<string>();
+    /** Sessions this socket joined, and whether each one's game streams held controls. */
+    const joined = new Map<string, boolean>();
     const run = async (code: string, fn: (room: Room) => unknown) => {
       await manager.run(code, fn);
       return undefined;
@@ -112,7 +116,7 @@ export function createGateway(server: HttpServer, opts: GatewayOptions) {
           const fresh = (await getUser(db, user.id)) ?? user;
           if (fresh.deactivatedAt) throw new GameError("This account is deactivated");
           const view = await manager.join(code, fresh, socket.id, alias);
-          joined.add(code);
+          joined.set(code, manager.acceptsInput(view.gameType));
           return view;
         },
         2,
@@ -164,8 +168,17 @@ export function createGateway(server: HttpServer, opts: GatewayOptions) {
       ),
     );
 
+    // Held controls are fire-and-forget: no ack, no room lock, and dropped quietly when invalid.
+    socket.on("game:input", (payload) => {
+      const parsed = sessionCodeSchema.safeParse(payload?.code);
+      if (!parsed.success || !joined.get(parsed.data)) return;
+      if (!limiter.take(`${socket.id}:input`, maxInputRate)) return;
+      if (JSON.stringify(payload.input ?? null).length > maxInputBytes) return;
+      manager.input(parsed.data, user.id, payload.input).catch((err) => log.error("socket input failed", err));
+    });
+
     socket.on("disconnect", () => {
-      for (const code of joined) {
+      for (const code of joined.keys()) {
         manager.disconnect(code, user.id, socket.id).catch((err) => log.error("socket disconnect failed", err));
       }
       limiter.clear(`${socket.id}:`);

@@ -10,6 +10,7 @@ import { createDb } from "./db/client.js";
 import { GoogleAuth } from "./auth/google.js";
 import { registerAuth } from "./auth/plugin.js";
 import { GameError } from "./games/contract.js";
+import { createClashEngine } from "./games/clash/engine.js";
 import { createDrawEngine } from "./games/draw/engine.js";
 import { curatedWordSource, type WordSource } from "./games/draw/words.js";
 import { createQuizEngine } from "./games/quiz/engine.js";
@@ -40,7 +41,8 @@ export async function buildApp(
     new GameRegistry()
       .register(createQuizEngine(quizSource))
       .register(createDrawEngine(wordSource))
-      .register(createTruthsEngine());
+      .register(createTruthsEngine())
+      .register(createClashEngine());
   const google = new GoogleAuth(config);
   const log = { info: (m: string) => app.log.info(m), error: (m: string, e?: unknown) => app.log.error({ err: e }, m) };
   // With Redis, live sessions are shared by every server instance; without it they stay in this process.
