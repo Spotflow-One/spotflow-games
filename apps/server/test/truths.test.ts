@@ -9,7 +9,7 @@ const u = (id: string) => ({ id, displayName: id, avatar: null });
 const PLAYERS = ["host", "ada", "ben"];
 
 function makeRoom(config: object = { featuredCount: 3, voteSec: 30, writeSec: 120 }, hostPlays = true) {
-  const hooks: RoomHooks = { sendState: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
+  const hooks: RoomHooks = { sendStates: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
   const room = new Room(
     {
       id: "s1",

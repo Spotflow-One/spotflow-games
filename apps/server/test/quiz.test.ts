@@ -22,7 +22,7 @@ const engine = createQuizEngine(source, { countdownMs: 3000, revealMs: 5000 });
 const u = (id: string) => ({ id, displayName: id, avatar: null });
 
 function makeRoom(config: object = { quizId: quiz.id, timeLimitSec: 10 }, hostPlays = true) {
-  const hooks: RoomHooks = { sendState: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
+  const hooks: RoomHooks = { sendStates: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
   const room = new Room(
     {
       id: "s1",

@@ -60,11 +60,12 @@ export function createQuizEngine(
   const limitMs = (state: QuizState) =>
     (state.config.questions[state.index]?.timeLimitSec ?? state.config.timeLimitSec) * 1000;
 
-  const setPhase = (ctx: GameContext, state: QuizState, phase: QuizState["phase"], ms: number, next: () => void) => {
+  /** When the phase timer runs out, `onTimer` moves on to the next phase. */
+  const setPhase = (ctx: GameContext, state: QuizState, phase: QuizState["phase"], ms: number) => {
     state.phase = phase;
     state.phaseStartedAt = ctx.now();
     state.phaseEndsAt = state.phaseStartedAt + ms;
-    ctx.setTimer("phase", ms, next);
+    ctx.setTimer("phase", ms);
     ctx.broadcastState();
   };
 
@@ -72,7 +73,7 @@ export function createQuizEngine(
     state.index = index;
     state.answers.clear();
     state.points.clear();
-    setPhase(ctx, state, "question", limitMs(state), () => closeQuestion(ctx, state));
+    setPhase(ctx, state, "question", limitMs(state));
   };
 
   const closeQuestion = (ctx: GameContext, state: QuizState) => {
@@ -88,7 +89,7 @@ export function createQuizEngine(
       // Ties go to whoever was faster overall; wrong or missing answers count as the full time.
       ctx.addTiebreakTime(userId, correct ? answer.ms : limit);
     }
-    setPhase(ctx, state, "reveal", timing.revealMs, () => advance(ctx, state));
+    setPhase(ctx, state, "reveal", timing.revealMs);
   };
 
   const advance = (ctx: GameContext, state: QuizState) => {
@@ -131,7 +132,7 @@ export function createQuizEngine(
         answers: new Map(),
         points: new Map(),
       };
-      setPhase(ctx, state, "countdown", timing.countdownMs, () => openQuestion(ctx, state, 0));
+      setPhase(ctx, state, "countdown", timing.countdownMs);
       return state;
     },
 
@@ -157,6 +158,13 @@ export function createQuizEngine(
         return;
       }
       throw new GameError("Unknown action");
+    },
+
+    onTimer(ctx, state, name) {
+      if (name !== "phase") return;
+      if (state.phase === "countdown") openQuestion(ctx, state, 0);
+      else if (state.phase === "question") closeQuestion(ctx, state);
+      else advance(ctx, state);
     },
 
     onPlayerRemoved(ctx, state) {

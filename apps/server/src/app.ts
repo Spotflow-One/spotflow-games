@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { Redis } from "ioredis";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
@@ -21,6 +22,7 @@ import { contentRoutes } from "./routes/content.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { userRoutes } from "./routes/users.js";
 import { SessionManager } from "./sessions/manager.js";
+import { RedisRoomStore, redisBus } from "./sessions/redisStore.js";
 
 export async function buildApp(
   config: Config,
@@ -40,10 +42,16 @@ export async function buildApp(
       .register(createDrawEngine(wordSource))
       .register(createTruthsEngine());
   const google = new GoogleAuth(config);
-  const manager = new SessionManager(db, registry, {
-    lobbyExpiryMs: config.LOBBY_EXPIRY_MINUTES * 60_000,
-    log: { info: (m) => app.log.info(m), error: (m, e) => app.log.error({ err: e }, m) },
-  });
+  const log = { info: (m: string) => app.log.info(m), error: (m: string, e?: unknown) => app.log.error({ err: e }, m) };
+  // With Redis, live sessions are shared by every server instance; without it they stay in this process.
+  const redis = config.REDIS_URL ? new Redis(config.REDIS_URL, { maxRetriesPerRequest: 3 }) : null;
+  const redisSub = redis?.duplicate() ?? null;
+  const manager = new SessionManager(
+    db,
+    registry,
+    { lobbyExpiryMs: config.LOBBY_EXPIRY_MINUTES * 60_000, log },
+    redis ? (builder, transport) => new RedisRoomStore(redis, builder, transport, { log }) : undefined,
+  );
 
   await app.register(cookie, { secret: config.COOKIE_SECRET });
   registerAuth(app, db);
@@ -81,11 +89,14 @@ export async function buildApp(
     appOrigin: new URL(config.APP_URL).origin,
     parseCookie: (header) => app.parseCookie(header),
     log: { info: (m) => app.log.info(m), warn: (m) => app.log.warn(m), error: (m, e) => app.log.error({ err: e }, m) },
+    bus: redis && redisSub ? (local) => redisBus(redis, redisSub, local, log) : undefined,
   });
 
   app.addHook("onClose", async () => {
-    await manager.stop();
+    // Close sockets first so players are marked disconnected before the store goes away.
     io.close();
+    await manager.stop();
+    await Promise.all([redis?.quit(), redisSub?.quit()]);
     await pool.end();
   });
 

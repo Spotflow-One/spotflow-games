@@ -21,6 +21,11 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   SESSION_TTL_DAYS: z.coerce.number().default(30),
   LOBBY_EXPIRY_MINUTES: z.coerce.number().default(60),
+  /**
+   * Redis for live sessions. When set, sessions are shared by every server instance (needed on
+   * hosts like Vercel that run several). When unset, they are kept in this process.
+   */
+  REDIS_URL: z.string().optional(),
   /** Directory with the built web app, served in production. */
   WEB_DIST: z.string().optional(),
 });

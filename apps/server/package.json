@@ -30,6 +30,7 @@
     "drizzle-orm": "^0.45.4",
     "fastify": "^5.12.7",
     "google-auth-library": "^11.3.1",
+    "ioredis": "^5.11.1",
     "pg": "^8.23.1",
     "socket.io": "^4.8.4",
     "zod": "^4.6.7"

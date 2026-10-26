@@ -20,7 +20,7 @@ const stroke = {
 };
 
 function makeRoom(config: object = { wordListId: words.id, turnSec: 60 }) {
-  const hooks: RoomHooks = { sendState: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
+  const hooks: RoomHooks = { sendStates: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() };
   const room = new Room(
     {
       id: "s1",
@@ -206,7 +206,7 @@ describe("Draw & Guess", () => {
         createdAt: new Date(),
       },
       engine,
-      { sendState: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() },
+      { sendStates: vi.fn(), sendEvent: vi.fn(), onResults: vi.fn(), onClosed: vi.fn() },
     );
     solo.join(u("host"), "h", 50);
     await expect(solo.start("host")).rejects.toThrow("At least 2");
