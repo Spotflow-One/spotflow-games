@@ -34,6 +34,8 @@ export interface ParticipantView {
   isHost: boolean;
   connected: boolean;
   score: number;
+  /** Final rank from the server's tie-break rules, once the game has ended. */
+  rank: number | null;
 }
 
 /** What a single client sees. The server builds one per player so secrets never leak. */

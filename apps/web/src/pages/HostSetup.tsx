@@ -3,8 +3,10 @@ import { Link, Navigate, useNavigate, useParams } from "react-router";
 import {
   GAME_INFO,
   GAME_TYPES,
+  DRAW_RULES,
   QUIZ_RULES,
   type GameType,
+  type WordListSummary,
   type QuizSummary,
   type SessionSummary,
 } from "@spotflow-games/shared";
@@ -12,6 +14,7 @@ import { api } from "../lib/api";
 import { GameIcon } from "../components/GameIcon";
 
 const TIME_LIMITS = [10, 20, 30, 45, 60];
+const TURN_LENGTHS = [45, 60, 80, 100, 120];
 
 function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -31,10 +34,25 @@ export function HostSetup() {
   const [timeLimitSec, setTimeLimitSec] = useState<number>(QUIZ_RULES.defaultTimeLimitSec);
   const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [shuffleOptions, setShuffleOptions] = useState(true);
+  const [wordLists, setWordLists] = useState<WordListSummary[] | null>(null);
+  const [wordListId, setWordListId] = useState<string | null>(null);
+  const [turnSec, setTurnSec] = useState<number>(DRAW_RULES.defaultTurnSec);
+  const [rounds, setRounds] = useState(1);
   const [hostPlays, setHostPlays] = useState(true);
   const [allowLateJoin, setAllowLateJoin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (gameType !== "draw") return;
+    api<WordListSummary[]>("/api/word-lists").then(
+      (list) => {
+        setWordLists(list);
+        setWordListId((id) => id ?? list[0]?.id ?? null);
+      },
+      (err: Error) => setError(err.message),
+    );
+  }, [gameType]);
 
   useEffect(() => {
     if (gameType !== "quiz") return;
@@ -54,7 +72,12 @@ export function HostSetup() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const config = gameType === "quiz" ? { quizId, timeLimitSec, shuffleQuestions, shuffleOptions } : {};
+    const config =
+      gameType === "quiz"
+        ? { quizId, timeLimitSec, shuffleQuestions, shuffleOptions }
+        : gameType === "draw"
+          ? { wordListId, turnSec, rounds }
+          : {};
     try {
       const s = await api<SessionSummary>("/api/sessions", {
         method: "POST",
@@ -130,6 +153,52 @@ export function HostSetup() {
         </section>
       )}
 
+      {gameType === "draw" && (
+        <section className="sg-card sg-stack" aria-labelledby="words-pick">
+          <h2 id="words-pick" className="sg-h3">
+            Pick a word list
+          </h2>
+          {!wordLists && <p className="sg-muted">Loading word lists…</p>}
+          <div className="quiz-picker" role="radiogroup" aria-labelledby="words-pick">
+            {wordLists?.map((l) => (
+              <button
+                type="button"
+                key={l.id}
+                role="radio"
+                aria-checked={wordListId === l.id}
+                className="quiz-option"
+                onClick={() => setWordListId(l.id)}
+              >
+                <b>{l.title}</b>
+                <span className="sg-muted">
+                  {l.wordCount} words{l.curated ? " · Curated" : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="sg-field">
+            <label id="turn-length">Time to draw</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="turn-length">
+              {TURN_LENGTHS.map((t) => (
+                <button type="button" key={t} role="radio" aria-checked={turnSec === t} onClick={() => setTurnSec(t)}>
+                  {t}s
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="sg-field">
+            <label id="rounds">Times everyone draws</label>
+            <div className="sg-seg" role="radiogroup" aria-labelledby="rounds">
+              {[1, 2, 3].map((r) => (
+                <button type="button" key={r} role="radio" aria-checked={rounds === r} onClick={() => setRounds(r)}>
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="sg-card sg-stack" aria-labelledby="session-settings">
         <h2 id="session-settings" className="sg-h3">
           Session
@@ -139,7 +208,11 @@ export function HostSetup() {
       </section>
 
       <div className="sg-row">
-        <button className={`sg-btn lg ${gameType}`} type="submit" disabled={busy || (gameType === "quiz" && !quizId)}>
+        <button
+          className={`sg-btn lg ${gameType}`}
+          type="submit"
+          disabled={busy || (gameType === "quiz" && !quizId) || (gameType === "draw" && !wordListId)}
+        >
           {busy ? "Opening lobby…" : "Open lobby"}
         </button>
         <Link className="sg-btn ghost" to="/">

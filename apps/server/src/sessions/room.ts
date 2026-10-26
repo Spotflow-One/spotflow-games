@@ -262,6 +262,8 @@ export class Room {
   }
 
   viewFor(userId: string): SessionView {
+    const ended = this.status === "results" || this.status === "completed";
+    const ranks = ended ? new Map(this.standings().map((r) => [r.userId, r.rank])) : null;
     const participants: ParticipantView[] = [...this.participants.values()]
       .sort((a, b) => a.joinedAt - b.joinedAt)
       .map((p) => ({
@@ -271,6 +273,7 @@ export class Room {
         isHost: p.userId === this.hostId,
         connected: p.socketIds.size > 0,
         score: p.score,
+        rank: ranks?.get(p.userId) ?? null,
       }));
     let game: unknown = null;
     if (this.engine && this.gameState !== null) {
@@ -383,7 +386,9 @@ export class Room {
       },
       broadcastState: () => this.broadcast(),
       emitEvent: (event, opts) => {
-        const ids = [...this.participants.keys()].filter((id) => id !== opts?.exceptUserId);
+        const ids = (opts?.onlyUserIds ?? [...this.participants.keys()]).filter(
+          (id) => id !== opts?.exceptUserId && this.participants.has(id),
+        );
         this.hooks.sendEvent(ids, event);
       },
       finish: () => this.finish(),
