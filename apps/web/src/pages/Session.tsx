@@ -16,6 +16,7 @@ import {
 import {
   GAME_INFO,
   MAX_PLAYERS_PER_SESSION,
+  type DrawView,
   type ParticipantView,
   type QuizView,
   type SessionView,
@@ -26,6 +27,7 @@ import { getSocket, request } from "../lib/socket";
 import { playSound } from "../lib/sound";
 import { Avatar } from "../components/Avatar";
 import { GameIcon } from "../components/GameIcon";
+import { DrawScreen } from "../games/DrawScreen";
 import { QuizScreen } from "../games/QuizScreen";
 
 type Conn = "connecting" | "connected" | "reconnecting";
@@ -172,7 +174,10 @@ export function Session() {
       {view.status === "in_progress" && view.game !== null && view.gameType === "quiz" && (
         <QuizScreen session={view} game={view.game as QuizView} meId={me.id} onError={setNotice} />
       )}
-      {view.status === "in_progress" && view.gameType !== "quiz" && (
+      {view.status === "in_progress" && view.game !== null && view.gameType === "draw" && (
+        <DrawScreen session={view} game={view.game as DrawView} meId={me.id} onError={setNotice} />
+      )}
+      {view.status === "in_progress" && view.gameType === "truths" && (
         <div className="sg-card sg-stack">
           <h2 className="sg-h3">Game in progress</h2>
           <p className="sg-muted" style={{ margin: 0 }}>
@@ -331,8 +336,7 @@ function HostControls({ view, act }: { view: SessionView; act: Act }) {
 function Results({ view, meId }: { view: SessionView; meId: string }) {
   const players = view.participants
     .filter((p) => view.hostPlays || !p.isHost)
-    .sort((a, b) => b.score - a.score || a.displayName.localeCompare(b.displayName));
-  let rank = 0;
+    .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || b.score - a.score);
   return (
     <section className="sg-card sg-stack" aria-labelledby="results-heading">
       <div className="sg-row">
@@ -344,11 +348,11 @@ function Results({ view, meId }: { view: SessionView; meId: string }) {
         {view.status === "completed" && <span className="sg-badge success">Saved</span>}
       </div>
       <ol className="sg-board" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-        {players.map((p, i) => {
-          if (i === 0 || players[i - 1]!.score !== p.score) rank = i + 1;
+        {players.map((p) => {
+          const rank = p.rank;
           return (
             <li key={p.userId} className={`sg-lrow${p.userId === meId ? " you" : ""}`}>
-              <span className={`sg-rank${rank <= 3 ? ` r${rank}` : ""}`}>{rank}</span>
+              <span className={`sg-rank${rank && rank <= 3 ? ` r${rank}` : ""}`}>{rank ?? "–"}</span>
               <Avatar avatar={p.avatar} name={p.displayName} userId={p.userId} size="sm" />
               <span className="who">
                 <b>

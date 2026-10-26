@@ -9,19 +9,21 @@ import { createDb } from "./db/client.js";
 import { GoogleAuth } from "./auth/google.js";
 import { registerAuth } from "./auth/plugin.js";
 import { GameError } from "./games/contract.js";
+import { createDrawEngine } from "./games/draw/engine.js";
+import { curatedWordSource, type WordSource } from "./games/draw/words.js";
 import { createQuizEngine } from "./games/quiz/engine.js";
 import { curatedQuizSource, type QuizSource } from "./games/quiz/library.js";
 import { GameRegistry } from "./games/registry.js";
 import { createGateway } from "./realtime/gateway.js";
 import { authRoutes } from "./routes/auth.js";
-import { quizRoutes } from "./routes/quizzes.js";
+import { contentRoutes } from "./routes/content.js";
 import { sessionRoutes } from "./routes/sessions.js";
 import { userRoutes } from "./routes/users.js";
 import { SessionManager } from "./sessions/manager.js";
 
 export async function buildApp(
   config: Config,
-  opts: { registry?: GameRegistry; quizSource?: QuizSource; logger?: boolean } = {},
+  opts: { registry?: GameRegistry; quizSource?: QuizSource; wordSource?: WordSource; logger?: boolean } = {},
 ) {
   const app = Fastify({
     logger: opts.logger ?? { level: config.NODE_ENV === "test" ? "warn" : "info" },
@@ -29,7 +31,9 @@ export async function buildApp(
   });
   const { db, pool } = createDb(config.DATABASE_URL);
   const quizSource = opts.quizSource ?? curatedQuizSource;
-  const registry = opts.registry ?? new GameRegistry().register(createQuizEngine(quizSource));
+  const wordSource = opts.wordSource ?? curatedWordSource;
+  const registry =
+    opts.registry ?? new GameRegistry().register(createQuizEngine(quizSource)).register(createDrawEngine(wordSource));
   const google = new GoogleAuth(config);
   const manager = new SessionManager(db, registry, {
     lobbyExpiryMs: config.LOBBY_EXPIRY_MINUTES * 60_000,
@@ -55,7 +59,7 @@ export async function buildApp(
   authRoutes(app, { db, config, google });
   userRoutes(app, { db, config });
   sessionRoutes(app, { manager, registry });
-  quizRoutes(app, { quizSource });
+  contentRoutes(app, { quizSource, wordSource });
 
   // In production the server also serves the built web app, so one container runs everything.
   if (config.WEB_DIST && existsSync(config.WEB_DIST)) {

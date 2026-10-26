@@ -142,3 +142,33 @@ body,
   background: var(--primary-soft);
   box-shadow: 0 0 0 2px var(--primary);
 }
+.draw-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+.draw-feed {
+  max-height: 420px;
+  overflow-y: auto;
+}
+.draw-feed-card {
+  padding: var(--space-4);
+}
+.sg-hint .gap {
+  width: 12px;
+}
+@media (max-width: 1023px) {
+  .draw-layout {
+    grid-template-columns: 1fr;
+  }
+}
+/* On phones the app bar keeps sound, profile and sign-out; theme lives on the profile page. */
+@media (max-width: 479px) {
+  .app-appbar {
+    gap: var(--space-2);
+  }
+  .appbar-theme {
+    display: none;
+  }
+}

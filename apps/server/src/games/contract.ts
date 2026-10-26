@@ -20,8 +20,11 @@ export interface GameContext {
   addTiebreakTime(userId: string, ms: number): void;
   /** Push fresh per-player views to everyone. */
   broadcastState(): void;
-  /** Send a transient event (e.g. drawing strokes) without a full state push. */
-  emitEvent(event: unknown, opts?: { exceptUserId?: string }): void;
+  /**
+   * Send a transient event (e.g. drawing strokes) without a full state push.
+   * `onlyUserIds` targets specific players, such as one catching up after a reconnect.
+   */
+  emitEvent(event: unknown, opts?: { exceptUserId?: string; onlyUserIds?: string[] }): void;
   /** End gameplay and move the session to results. */
   finish(): void;
 }

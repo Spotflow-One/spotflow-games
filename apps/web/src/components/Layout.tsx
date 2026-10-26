@@ -32,7 +32,7 @@ export function Layout() {
           {soundEnabled ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
         </button>
         <button
-          className="sg-btn ghost sm"
+          className="sg-btn ghost sm appbar-theme"
           aria-label={`Theme: ${theme}. Switch to ${NEXT_THEME[theme]}`}
           title={`Theme: ${theme}`}
           onClick={() => setTheme(NEXT_THEME[theme])}
