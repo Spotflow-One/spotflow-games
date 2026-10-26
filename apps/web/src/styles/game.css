@@ -1,0 +1,758 @@
+/*
+ * Game-feel layer: arena backgrounds, lobby, buzzer answers, reveals, podium and celebrations.
+ * Values come from tokens only. Motion is cut by the reduced-motion rule in app.css.
+ */
+
+.display-xl {
+  font: 800 44px/48px var(--font-display);
+  letter-spacing: -0.02em;
+  margin: 0;
+  text-wrap: balance;
+}
+@media (max-width: 599px) {
+  .display-xl {
+    font-size: 34px;
+    line-height: 38px;
+  }
+}
+
+/* Arena: while in a session the page picks up the game's colour as a soft dotted backdrop. */
+:root[data-arena] {
+  --g: var(--game-quiz);
+  --gs: var(--game-quiz-soft);
+  --gi: var(--game-quiz-ink);
+  --go: var(--on-game-quiz);
+}
+:root[data-arena="draw"] {
+  --g: var(--game-draw);
+  --gs: var(--game-draw-soft);
+  --gi: var(--game-draw-ink);
+  --go: var(--on-game-draw);
+}
+:root[data-arena="truths"] {
+  --g: var(--game-truths);
+  --gs: var(--game-truths-soft);
+  --gi: var(--game-truths-ink);
+  --go: var(--on-game-truths);
+}
+:root[data-arena] .sg-screen {
+  background:
+    radial-gradient(circle at 1px 1px, var(--gs) 1.5px, transparent 0) 0 0 / 22px 22px,
+    linear-gradient(180deg, var(--gs), var(--surface) 360px);
+  background-color: var(--surface);
+}
+:root[data-arena] .app-main {
+  max-width: 980px;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(6px);
+  }
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes bounce-dot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+.pop-in {
+  animation: pop-in var(--duration-base) cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+}
+.dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: var(--space-1);
+  vertical-align: middle;
+}
+.dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  animation: bounce-dot 1.2s infinite;
+}
+.dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Lobby */
+.lobby-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-6);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-top: 6px solid var(--g);
+  box-shadow: var(--shadow-md);
+}
+.lobby-code {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+.lobby-code span {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 80px;
+  border-radius: var(--radius-lg);
+  background: var(--gs);
+  color: var(--ink);
+  border: 2px solid var(--g);
+  box-shadow: 0 4px 0 var(--g);
+  font: 700 44px/1 var(--font-mono);
+}
+@media (max-width: 599px) {
+  .lobby-hero {
+    padding: var(--space-6) var(--space-4);
+  }
+  .lobby-code {
+    gap: var(--space-1);
+  }
+  .lobby-code span {
+    width: 44px;
+    height: 58px;
+    font-size: 30px;
+    border-radius: var(--radius-md);
+  }
+}
+.waiting {
+  font-weight: 700;
+}
+.host-controls {
+  align-items: center;
+  text-align: center;
+}
+.start-btn {
+  min-width: 260px;
+  min-height: 64px;
+  font-size: 22px;
+  border-radius: var(--radius-xl);
+}
+
+/* Compact bar shown instead of the page header while a game is running. */
+.game-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.game-bar-meta {
+  font-size: 14px;
+}
+.play-roster {
+  padding: var(--space-3) var(--space-4);
+}
+.play-roster summary {
+  cursor: pointer;
+  min-height: var(--size-target);
+}
+.play-roster[open] summary {
+  margin-bottom: var(--space-3);
+}
+
+/* Get ready splash */
+@keyframes count-pop {
+  from {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+.get-ready {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-12) var(--space-6);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+.get-ready-count {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  width: 160px;
+  height: 160px;
+  border-radius: var(--radius-full);
+  background: var(--g);
+  color: var(--go);
+  font: 800 96px/1 var(--font-display);
+  box-shadow: 0 6px 0 var(--gi);
+  animation: count-pop var(--duration-base) ease-out;
+}
+
+/* Question */
+.question-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-6);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.question-card .sg-timer {
+  width: 104px;
+  height: 104px;
+}
+.question-card .sg-timer span {
+  font-size: 36px;
+}
+.quiz-prompt {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: 700 34px/40px var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.sg-progress.quiz i {
+  background: var(--game-quiz);
+}
+.big-score {
+  position: relative;
+  font-size: 20px;
+  line-height: 24px;
+  padding: var(--space-2) var(--space-4);
+}
+@keyframes float-up {
+  from {
+    transform: translateY(12px) scale(0.8);
+    opacity: 0;
+  }
+}
+.float-up {
+  display: inline-block;
+  font-weight: 700;
+  animation: float-up var(--duration-slow) cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+}
+
+/* Buzzer answers: filled with their colour, shape and number, like physical buttons. */
+.sg-answer.buzzer {
+  min-height: 96px;
+  border: 0;
+  background: var(--a);
+  color: var(--ai);
+  font: 700 22px/28px var(--font-display);
+  box-shadow: 0 6px 0 rgba(24, 22, 44, 0.28);
+  transition:
+    transform var(--duration-fast),
+    box-shadow var(--duration-fast),
+    opacity var(--duration-base),
+    filter var(--duration-fast);
+}
+.sg-answer.buzzer:not(:disabled):hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow: 0 8px 0 rgba(24, 22, 44, 0.28);
+}
+.sg-answer.buzzer:not(:disabled):active {
+  transform: translateY(6px);
+  box-shadow: none;
+}
+.sg-answer.buzzer .shape {
+  width: 52px;
+  height: 52px;
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--ai);
+}
+.sg-answer.buzzer .shape svg {
+  width: 26px;
+  height: 26px;
+}
+.sg-answer.buzzer .key {
+  color: inherit;
+  border-color: currentColor;
+  opacity: 0.7;
+}
+/* Once you've answered, your pick stays bright and pressed in, the rest step back. */
+.buzzers.answered .sg-answer.buzzer.locked,
+.buzzers.revealed .sg-answer.buzzer.locked {
+  opacity: 0.45;
+  box-shadow: none;
+}
+.sg-answer.buzzer.selected {
+  transform: translateY(6px);
+  box-shadow:
+    0 0 0 4px var(--surface),
+    0 0 0 7px var(--ink);
+  border: 0;
+  background: var(--a);
+}
+.sg-answer.buzzer.correct {
+  background: var(--a);
+  box-shadow:
+    0 0 0 4px var(--surface),
+    0 0 0 8px var(--success);
+  animation: pop-in var(--duration-base) cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.sg-answer.buzzer.wrong {
+  background: var(--a);
+  box-shadow:
+    0 0 0 4px var(--surface),
+    0 0 0 8px var(--danger);
+}
+.sg-answer.buzzer .verdict {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  font: 700 14px/20px var(--font-body);
+}
+.sg-answer.buzzer:disabled {
+  cursor: default;
+}
+@media (max-width: 599px) {
+  .question-card {
+    flex-direction: column;
+    text-align: center;
+    padding: var(--space-4);
+    gap: var(--space-3);
+  }
+  .question-card .sg-timer {
+    width: 84px;
+    height: 84px;
+  }
+  .quiz-prompt {
+    font-size: 24px;
+    line-height: 30px;
+  }
+  .sg-answer.buzzer {
+    min-height: 72px;
+    font-size: 19px;
+  }
+}
+
+.locked-in {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-full);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 700;
+}
+
+/* Your result for the round, big enough to read across a video call. */
+.reveal-burst {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-radius: var(--radius-xl);
+  border: 2px solid var(--danger);
+  background: var(--danger-soft);
+  animation: pop-in var(--duration-base) cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.reveal-burst.right {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+.reveal-burst > svg {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  color: var(--danger);
+}
+.reveal-burst.right > svg {
+  color: var(--success);
+}
+.reveal-burst b {
+  display: block;
+  font: 800 30px/34px var(--font-display);
+}
+.reveal-burst span {
+  font-size: 18px;
+}
+
+.standings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.standings ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.sg-lrow .gain {
+  margin-right: var(--space-2);
+  color: var(--success);
+  font-weight: 700;
+}
+
+/* Results */
+.results-hero {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-4) 0;
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-top: 6px solid var(--g);
+  box-shadow: var(--shadow-md);
+}
+.results-hero h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.results-trophy {
+  width: 40px;
+  height: 40px;
+  color: var(--medal-gold);
+}
+.podium-anim {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-4) 0 0;
+  width: 100%;
+}
+.sg-podium .col {
+  min-width: 0;
+  flex: 0 1 150px;
+}
+.podium-name {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@keyframes rise {
+  from {
+    transform: scaleY(0);
+  }
+}
+.podium-anim .block {
+  transform-origin: bottom;
+  animation: rise var(--duration-slow) cubic-bezier(0.2, 1.2, 0.4, 1) backwards;
+}
+.podium-anim .col > :not(.block) {
+  animation: pop-in var(--duration-base) ease-out backwards;
+}
+.podium-anim .p3 .block,
+.podium-anim .p3 > :not(.block) {
+  animation-delay: 0.1s;
+}
+.podium-anim .p2 .block,
+.podium-anim .p2 > :not(.block) {
+  animation-delay: 0.4s;
+}
+.podium-anim .p1 .block,
+.podium-anim .p1 > :not(.block) {
+  animation-delay: 0.7s;
+}
+@media (max-width: 479px) {
+  .sg-podium {
+    gap: var(--space-2);
+  }
+  .sg-podium .p1 .block {
+    height: 120px;
+  }
+  .sg-podium .p2 .block {
+    height: 90px;
+  }
+  .sg-podium .p3 .block {
+    height: 64px;
+  }
+}
+
+.confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.confetti i {
+  position: absolute;
+  top: -16px;
+  width: 9px;
+  height: 15px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: confetti-fall 2.8s ease-in 1 forwards;
+}
+.confetti i.quiz {
+  background: var(--game-quiz);
+}
+.confetti i.draw {
+  background: var(--game-draw);
+}
+.confetti i.truths {
+  background: var(--game-truths);
+}
+.confetti i.primary {
+  background: var(--primary);
+}
+.confetti i.gold {
+  background: var(--medal-gold);
+}
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translateY(0) rotate(var(--spin));
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(520px) rotate(calc(var(--spin) + 540deg));
+  }
+}
+
+/* Home */
+.home-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 1px 1px, var(--primary-soft) 1.5px, transparent 0) 0 0 / 22px 22px,
+    var(--surface-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.join-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
+  border: 2px solid var(--primary);
+  box-shadow: 0 6px 0 var(--primary);
+}
+.join-box-row {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.join-box .sg-input.code {
+  flex: 1;
+  width: auto;
+  min-width: 160px;
+  min-height: 56px;
+  font-size: 26px;
+}
+@media (max-width: 799px) {
+  .home-hero {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-5);
+    gap: var(--space-5);
+  }
+  .join-box {
+    padding: var(--space-4);
+  }
+  .join-box .sg-btn {
+    flex: 1;
+  }
+}
+
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  background: var(--danger);
+  animation: pulse 1.4s infinite;
+}
+.live-lobbies {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+.live-lobby {
+  --g: var(--game-quiz);
+  --go: var(--on-game-quiz);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-left: 6px solid var(--g);
+  color: inherit;
+  text-decoration: none;
+  transition: transform var(--duration-fast);
+}
+.live-lobby.draw {
+  --g: var(--game-draw);
+  --go: var(--on-game-draw);
+}
+.live-lobby.truths {
+  --g: var(--game-truths);
+  --go: var(--on-game-truths);
+}
+.live-lobby:hover {
+  transform: translateY(-2px);
+}
+.live-lobby .mark {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  background: var(--g);
+  color: var(--go);
+}
+
+/* Arcade-style game tiles */
+.sg-game.arcade {
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+  transition:
+    transform var(--duration-fast),
+    box-shadow var(--duration-fast);
+}
+.sg-game.arcade:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+.arcade-art {
+  display: grid;
+  place-items: center;
+  height: 140px;
+  background:
+    radial-gradient(circle at 1px 1px, var(--g) 1.5px, transparent 0) 0 0 / 18px 18px,
+    var(--gs);
+}
+.sg-game.arcade .mark {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 6px 0 var(--gi);
+  transform: rotate(-6deg);
+  transition: transform var(--duration-base);
+}
+.sg-game.arcade:hover .mark {
+  transform: rotate(4deg) scale(1.06);
+}
+.sg-game.arcade .mark svg {
+  width: 40px;
+  height: 40px;
+}
+.arcade-body {
+  flex: 1;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+
+a.sg-btn {
+  text-decoration: none;
+}
+.sg-wordmark {
+  white-space: nowrap;
+}
+@media (max-width: 599px) {
+  .game-bar {
+    flex-wrap: nowrap;
+    border-radius: var(--radius-lg);
+  }
+  .game-bar-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .game-bar .sg-badge {
+    flex: none;
+  }
+}
+@media (max-width: 479px) {
+  .game-bar-count {
+    display: none;
+  }
+}
+
+/* "How you'll appear" card in the lobby */
+.you-card {
+  border-radius: var(--radius-xl);
+  border-left: 6px solid var(--g);
+}
+
+/* Home page backdrop: a flying car racing through neon Tokyo (components/TokyoRun.tsx).
+   It looks the same in both themes, so only arcade-* tokens touch it, and the cards on top keep their theme. */
+:root[data-page="home"] body {
+  background: var(--arcade-sky-deep);
+}
+:root[data-page="home"] .sg-screen {
+  background: transparent;
+}
+:root[data-page="home"] .app-main {
+  position: relative;
+  z-index: 1;
+}
+.tokyo-run {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+.arcade-title {
+  color: var(--arcade-ink);
+  text-shadow: 0 2px 8px var(--arcade-sky);
+}
+:root[data-page="home"] .home-hero {
+  box-shadow:
+    0 0 0 2px var(--arcade-grid),
+    0 0 32px var(--arcade-grid);
+}
+:root[data-page="home"] .sg-game.arcade:hover {
+  box-shadow:
+    0 0 0 2px var(--arcade-glow),
+    0 0 28px var(--arcade-glow);
+}
+.app-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+:root[data-page="home"] .app-appbar {
+  position: relative;
+  z-index: 2;
+}
+/* Open sky between the hero and the games, where the race on the backdrop runs. */
+.race-lane {
+  height: clamp(110px, 18vh, 190px);
+  margin: calc(var(--space-6) * -1) 0;
+}

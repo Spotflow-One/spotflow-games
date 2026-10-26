@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { usePreferences } from "../lib/preferences";
 import { closeSocket } from "../lib/socket";
 import { Avatar } from "./Avatar";
+import { Wordmark } from "./Wordmark";
 
 const NEXT_THEME: Record<ThemePreference, ThemePreference> = { system: "light", light: "dark", dark: "system" };
 const THEME_ICON = { system: Monitor, light: Sun, dark: Moon };
@@ -19,8 +20,7 @@ export function Layout() {
     <div className="sg-screen">
       <header className="sg-appbar app-appbar">
         <Link to="/" className="sg-wordmark">
-          <img className="sg-logo" src="/spotflow-mark.png" alt="" width="24" height="22" />
-          Spotflow <em>Games</em>
+          <Wordmark />
         </Link>
         <span className="grow" />
         <button

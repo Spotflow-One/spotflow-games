@@ -195,3 +195,12 @@ body,
     display: none;
   }
 }
+.wordmark-by {
+  margin-left: var(--space-1);
+  font: 700 11px/1 var(--font-body);
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+  vertical-align: baseline;
+  position: relative;
+  bottom: -0.2em;
+}
