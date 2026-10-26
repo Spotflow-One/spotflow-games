@@ -85,6 +85,16 @@ The `Dockerfile` builds one image that serves the API, WebSockets and the web ap
 
 Live sessions are kept in memory on one instance, so run a single replica, or use sticky sessions, until the sessions get a shared store. One instance handles the launch target of 100 concurrent players. If the process restarts, games in progress are cancelled, and completed results are already saved.
 
+### Railway (recommended)
+
+`railway.json` builds the `Dockerfile` and runs exactly one replica, which is what live sessions need while they're kept in memory. To set it up:
+
+1. In Railway, create a project from this GitHub repo. Railway picks up `railway.json`.
+2. Under **Variables**, set `NODE_ENV=production`, `APP_URL` (the Railway URL or your custom domain, without a trailing slash), `DATABASE_URL`, `COOKIE_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAIL_DOMAIN` and `ADMIN_EMAILS`. Railway sets `PORT` itself.
+3. Under **Settings → Networking**, generate a domain or add your own, then add `<APP_URL>/api/auth/google/callback` to the Google OAuth client's redirect URIs.
+
+For Supabase, use the Session pooler connection string ending in `?uselibpqcompat=true&sslmode=require`.
+
 ### Vercel
 
 `vercel.json` deploys the same image as one Vercel service (`app`, Container runtime) that takes all public traffic. Nothing calls another service server-side, so there are no bindings. In the Vercel project:
