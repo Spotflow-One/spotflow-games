@@ -1,6 +1,6 @@
 Spotflow Games is the internal multiplayer games platform for Spotflow's remote team: Quiz Arena, Draw & Guess, and Two Truths and a Lie, played live during socials and company events. The interface should feel like game night with colleagues: bright, quick to read across a video call, fair to everyone, and never confusing about what just happened.
 
-> **Status: first draft.** The palette is a proposed starting point. Spotflow's logo and brand colours have not been applied yet; `primary` (Spotflow indigo) is the token to swap when they are. Token names will stay the same, so code built on them keeps working.
+> **Status: first draft.** Spotflow's mark is a single near-black ink with no brand hue, so the indigo `primary` and the three game colours are the Games platform's own palette, set against Spotflow's black-and-white identity. Token names are stable, so code built on them keeps working if the palette changes.
 
 ## Content fundamentals
 
@@ -75,7 +75,10 @@ This is the system's core rule, from the PRD's accessibility requirements.
 
 ## Logo
 
-Spotflow's logo isn't in this system yet. Until it is, the app bar sets "Spotflow **Games**" in `display` at 20px, with "Games" in `primary`.
+- Use the Spotflow mark (`assets/Logos/spotflow-mark.png`) at 24px, followed by "Spotflow **Games**" in `display` at 20px with "Games" in `primary`. That lockup is the app bar's left edge on every screen.
+- The mark is near-black on light surfaces and inverted to white in the dark theme. Never tint it with a game colour or place it on a game fill.
+- Leave at least `space-2` between the mark and the wordmark, and don't redraw or stretch the mark.
+- The file supplied is a 26×24 PNG. Get the SVG master before using it anywhere larger, such as a sign-in screen or Slack unfurl.
 
 ## Components
 

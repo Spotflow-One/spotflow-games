@@ -28,28 +28,28 @@ function makeRoom(
 const u = (id: string) => ({ id, displayName: id, avatar: null });
 
 describe("Room lifecycle", () => {
-  it("goes lobby -> ready -> in_progress -> results", () => {
+  it("goes lobby -> ready -> in_progress -> results", async () => {
     const { room, hooks } = makeRoom();
     room.join(u("host"), "s-h", 50);
     room.join(u("p1"), "s-1", 50);
     room.markReady("host");
     expect(room.status).toBe("ready");
-    room.start("host");
+    await room.start("host");
     expect(room.status).toBe("in_progress");
     room.handleAction("p1", { type: "finish" });
     expect(room.status).toBe("results");
     expect(hooks.onResults).toHaveBeenCalledOnce();
   });
 
-  it("only lets the host control the session", () => {
+  it("only lets the host control the session", async () => {
     const { room } = makeRoom();
     room.join(u("host"), "s-h", 50);
     room.join(u("p1"), "s-1", 50);
-    expect(() => room.start("p1")).toThrow(GameError);
+    await expect(room.start("p1")).rejects.toThrow(GameError);
     expect(() => room.kick("p1", "host")).toThrow(GameError);
   });
 
-  it("never creates duplicate participants for the same account", () => {
+  it("never creates duplicate participants for the same account", async () => {
     const { room } = makeRoom();
     room.join(u("p1"), "tab-1", 50);
     const second = room.join(u("p1"), "tab-2", 50);
@@ -61,27 +61,27 @@ describe("Room lifecycle", () => {
     expect(room.viewFor("p1").participants[0]!.connected).toBe(false);
   });
 
-  it("blocks late joining by default but lets existing players reconnect", () => {
+  it("blocks late joining by default but lets existing players reconnect", async () => {
     const { room } = makeRoom();
     room.join(u("host"), "s-h", 50);
     room.join(u("p1"), "s-1", 50);
-    room.start("host");
+    await room.start("host");
     expect(() => room.join(u("late"), "s-l", 50)).toThrow("already started");
     room.disconnect("p1", "s-1");
     expect(room.join(u("p1"), "s-1b", 50).reconnected).toBe(true);
   });
 
-  it("allows late joining when configured", () => {
+  it("allows late joining when configured", async () => {
     const { room } = makeRoom({ allowLateJoin: true });
     room.join(u("host"), "s-h", 50);
-    room.start("host");
+    await room.start("host");
     expect(() => room.join(u("late"), "s-l", 50)).not.toThrow();
   });
 
-  it("awards each scoring action only once, even on retries", () => {
+  it("awards each scoring action only once, even on retries", async () => {
     const { room } = makeRoom();
     room.join(u("host"), "s-h", 50);
-    room.start("host");
+    await room.start("host");
     room.handleAction("host", { type: "point" });
     room.handleAction("host", { type: "point" });
     expect(room.participants.get("host")!.score).toBe(100);
@@ -91,7 +91,7 @@ describe("Room lifecycle", () => {
     expect(room.scoreEvents).toHaveLength(2);
   });
 
-  it("keeps kicked players out", () => {
+  it("keeps kicked players out", async () => {
     const { room } = makeRoom();
     room.join(u("host"), "s-h", 50);
     room.join(u("p1"), "s-1", 50);
@@ -99,21 +99,21 @@ describe("Room lifecycle", () => {
     expect(() => room.join(u("p1"), "s-1", 50)).toThrow("removed");
   });
 
-  it("excludes a non-playing host from players", () => {
+  it("excludes a non-playing host from players", async () => {
     const { room } = makeRoom({ hostPlays: false });
     room.join(u("host"), "s-h", 50);
     room.join(u("p1"), "s-1", 50);
     expect(room.playerIds()).toEqual(["p1"]);
   });
 
-  it("enforces the session cap", () => {
+  it("enforces the session cap", async () => {
     const { room } = makeRoom();
     room.join(u("a"), "1", 2);
     room.join(u("b"), "2", 2);
     expect(() => room.join(u("c"), "3", 2)).toThrow("full");
   });
 
-  it("cancels when the host leaves the lobby", () => {
+  it("cancels when the host leaves the lobby", async () => {
     const { room, hooks } = makeRoom();
     room.join(u("host"), "s-h", 50);
     room.leave("host");
@@ -121,7 +121,7 @@ describe("Room lifecycle", () => {
     expect(hooks.onClosed).toHaveBeenCalled();
   });
 
-  it("isolates engine crashes to the room", () => {
+  it("isolates engine crashes to the room", async () => {
     const crashing = {
       ...testEngine,
       viewFor: () => {
@@ -130,7 +130,7 @@ describe("Room lifecycle", () => {
     };
     const { room } = makeRoom({}, crashing);
     room.join(u("host"), "s-h", 50);
-    room.start("host");
+    await room.start("host");
     expect(() => room.viewFor("host")).not.toThrow();
     expect(room.status).toBe("cancelled");
   });

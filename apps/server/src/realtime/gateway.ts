@@ -118,7 +118,10 @@ export function createGateway(server: HttpServer, opts: GatewayOptions) {
     );
     socket.on(
       "session:start",
-      handle("start", (room) => void room.start(user.id)),
+      handle("start", async (room) => {
+        await room.start(user.id);
+        return undefined;
+      }),
     );
     socket.on(
       "session:end",

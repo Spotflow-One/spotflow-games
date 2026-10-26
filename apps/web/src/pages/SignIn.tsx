@@ -32,6 +32,7 @@ export function SignIn() {
     <div className="center-page">
       <div className="sg-card sg-stack signin-card">
         <span className="sg-wordmark">
+          <img className="sg-logo" src="/spotflow-mark.png" alt="" width="24" height="22" />
           Spotflow <em>Games</em>
         </span>
         <h1 className="sg-h2">Game night with the team</h1>

@@ -110,6 +110,21 @@ describe("auth", () => {
   });
 });
 
+describe("quizzes", () => {
+  it("lists curated quizzes without leaking questions or answers", async () => {
+    const cookie = await signIn("quizzer@spotflow.one", "Quizzer");
+    const list = await (await fetch(`${base}/api/quizzes`, { headers: { cookie } })).json();
+    expect(list.length).toBeGreaterThanOrEqual(4);
+    expect(list[0]).toMatchObject({
+      id: expect.any(String),
+      title: expect.any(String),
+      questionCount: 10,
+      curated: true,
+    });
+    expect(JSON.stringify(list)).not.toContain("correctIndex");
+  });
+});
+
 describe("a full session over sockets", () => {
   it("runs lobby to completed and persists results once", async () => {
     const hostCookie = await signIn("host@spotflow.one", "Host");

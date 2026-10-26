@@ -205,7 +205,7 @@ body { margin: 0; background: var(--surface); color: var(--ink); font-family: va
 
 /* App bar */
 .sg-appbar { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-6); background: var(--surface-raised); border-bottom: 1px solid var(--border); }
-.sg-wordmark { display: inline-flex; align-items: baseline; gap: var(--space-2); font: 800 20px/1 var(--font-display); color: var(--ink); letter-spacing: -.01em; }
+.sg-wordmark { display: inline-flex; align-items: center; gap: var(--space-2); font: 800 20px/1 var(--font-display); color: var(--ink); letter-spacing: -.01em; }
 .sg-wordmark em { font-style: normal; color: var(--primary); }
 .sg-appbar .grow { flex: 1; }
 
@@ -225,3 +225,7 @@ body { margin: 0; background: var(--surface); color: var(--ink); font-family: va
 .hr1 { fill: var(--hair-1); } .hr2 { fill: var(--hair-2); } .hr3 { fill: var(--hair-3); } .hr4 { fill: var(--hair-4); } .hr5 { fill: var(--hair-5); } .hr6 { fill: var(--hair-6); }
 .sh1 { fill: var(--brush-blue); } .sh2 { fill: var(--brush-green); } .sh3 { fill: var(--brush-orange); } .sh4 { fill: var(--brush-purple); } .sh5 { fill: var(--brush-red); }
 .fe { fill: var(--avatar-ink); } .fl { fill: none; stroke: var(--avatar-ink); stroke-width: 2; stroke-linecap: round; }
+
+/* Spotflow logo mark: single-ink near-black PNG, inverted to white in the dark theme */
+.sg-logo { width: 24px; height: auto; display: block; flex: none; }
+[data-theme="dark"] .sg-logo { filter: invert(1); }

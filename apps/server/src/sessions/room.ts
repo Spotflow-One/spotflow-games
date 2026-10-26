@@ -66,6 +66,7 @@ export class Room {
   private timers = new Map<string, NodeJS.Timeout>();
   private gameState: unknown = null;
   private broadcastQueued = false;
+  private starting = false;
 
   constructor(
     init: RoomInit,
@@ -180,20 +181,28 @@ export class Room {
     this.broadcast();
   }
 
-  start(actorId: string) {
+  async start(actorId: string) {
     this.requireHost(actorId);
     if (this.status !== "lobby" && this.status !== "ready") throw new GameError("This session cannot be started");
     if (!this.engine) throw new GameError("This game is not available yet");
     if (this.playerIds().length < this.engine.minPlayers) {
       throw new GameError(`At least ${this.engine.minPlayers} players are needed to start`);
     }
-    this.touch();
-    // Settings (including any content snapshot) are frozen from here on.
-    this.config = this.engine.parseConfig(this.config);
-    this.status = "in_progress";
-    this.startedAt = new Date(this.now());
-    this.gameState = this.engine.start(this.ctx, this.config);
-    this.broadcast();
+    if (this.starting) throw new GameError("The game is already starting");
+    this.starting = true;
+    try {
+      // Settings, including a snapshot of the content, are frozen from here on.
+      const config = await this.engine.parseConfig(this.config);
+      if (this.status !== "lobby" && this.status !== "ready") return;
+      this.touch();
+      this.config = config;
+      this.status = "in_progress";
+      this.startedAt = new Date(this.now());
+      this.gameState = this.engine.start(this.ctx, this.config);
+      this.broadcast();
+    } finally {
+      this.starting = false;
+    }
   }
 
   /** Host ends the game. In the lobby this cancels; mid-game it goes to results with scores so far. */
@@ -265,8 +274,15 @@ export class Room {
       }));
     let game: unknown = null;
     if (this.engine && this.gameState !== null) {
-      game =
-        this.safely(() => this.engine!.viewFor(this.gameState, { userId, isHost: userId === this.hostId })) ?? null;
+      const players = this.playerIds();
+      const viewer = {
+        userId,
+        isHost: userId === this.hostId,
+        isPlayer: players.includes(userId),
+        playerCount: players.length,
+        now: this.now(),
+      };
+      game = this.safely(() => this.engine!.viewFor(this.gameState, viewer)) ?? null;
     }
     return {
       id: this.id,
@@ -335,6 +351,7 @@ export class Room {
       sessionId: this.id,
       now: () => this.now(),
       players: () => this.playerIds(),
+      isHost: (userId) => userId === this.hostId,
       setTimer: (name, ms, fn) => {
         const old = this.timers.get(name);
         if (old) clearTimeout(old);

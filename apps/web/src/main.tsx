@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import { PreferencesProvider } from "./lib/preferences";
 import { Layout } from "./components/Layout";
 import { Home } from "./pages/Home";
+import { HostSetup } from "./pages/HostSetup";
 import { Me } from "./pages/Me";
 import { Profile } from "./pages/Profile";
 import { Session } from "./pages/Session";
@@ -43,6 +44,7 @@ createRoot(document.getElementById("root")!).render(
               }
             >
               <Route index element={<Home />} />
+              <Route path="/host/:gameType" element={<HostSetup />} />
               <Route path="/join/:code" element={<JoinRedirect />} />
               <Route path="/s/:code" element={<Session />} />
               <Route path="/me" element={<Me />} />

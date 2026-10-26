@@ -9,6 +9,8 @@ export interface GameContext {
   now(): number;
   /** Ids of participants who play (excludes a non-playing host and removed players). */
   players(): string[];
+  /** Whether this user hosts the session. Use it to gate host-only actions such as skipping. */
+  isHost(userId: string): boolean;
   /** Named timers. Setting a name again replaces it. All are cleared when the session ends. */
   setTimer(name: string, ms: number, fn: () => void): void;
   clearTimer(name: string): void;
@@ -31,6 +33,11 @@ export interface ViewerInfo {
    * to reveal hidden answers, secret words or unrevealed votes.
    */
   isHost: boolean;
+  /** Whether the viewer is playing (a non-playing host only watches). */
+  isPlayer: boolean;
+  playerCount: number;
+  /** Server clock, so clients can correct timers for clock skew. */
+  now: number;
 }
 
 /**
@@ -41,8 +48,11 @@ export interface GameEngine<Config = unknown, State = unknown> {
   readonly type: GameType;
   readonly rulesVersion: number;
   readonly minPlayers: number;
-  /** Validate and normalize host settings. Throw GameError on bad input. */
-  parseConfig(raw: unknown): Config;
+  /**
+   * Validate host settings and resolve any content (e.g. load the quiz) into a snapshot,
+   * so later edits to the content cannot change a running session. Throw GameError on bad input.
+   */
+  parseConfig(raw: unknown): Config | Promise<Config>;
   start(ctx: GameContext, config: Config): State;
   handleAction(ctx: GameContext, state: State, userId: string, action: unknown): void;
   /** What one viewer may see. Must hide anything secret from this viewer. */

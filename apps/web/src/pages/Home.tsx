@@ -25,8 +25,6 @@ export function Home() {
   const [lobbies, setLobbies] = useState<SessionSummary[]>([]);
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState<string | null>(null);
-  const [hosting, setHosting] = useState<GameType | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api<GameListing[]>("/api/games").then(setGames, () => {});
@@ -35,18 +33,6 @@ export function Home() {
     const t = setInterval(load, 10_000);
     return () => clearInterval(t);
   }, []);
-
-  const host = async (gameType: GameType) => {
-    setHosting(gameType);
-    setError(null);
-    try {
-      const s = await api<SessionSummary>("/api/sessions", { method: "POST", body: { gameType } });
-      navigate(`/s/${s.code}`);
-    } catch (err) {
-      setError((err as Error).message);
-      setHosting(null);
-    }
-  };
 
   const join = (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,12 +48,6 @@ export function Home() {
         <h1 className="sg-h1">Hi {me?.displayName.split(" ")[0]}, what are we playing?</h1>
       </div>
 
-      {error && (
-        <div className="sg-banner danger" role="alert">
-          {error}
-        </div>
-      )}
-
       <section className="games" aria-label="Games">
         {(games.length
           ? games
@@ -82,9 +62,9 @@ export function Home() {
               {DESCRIPTIONS[g.type]}
             </p>
             <div className="sg-row">
-              <button className={`sg-btn ${g.type} sm`} disabled={hosting !== null} onClick={() => host(g.type)}>
-                {hosting === g.type ? "Creating…" : "Host a game"}
-              </button>
+              <Link className={`sg-btn ${g.type} sm`} to={`/host/${g.type}`}>
+                Host a game
+              </Link>
               {!g.available && <span className="sg-badge neutral">Gameplay coming soon</span>}
             </div>
           </article>
