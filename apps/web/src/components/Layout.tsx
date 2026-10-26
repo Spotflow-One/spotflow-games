@@ -19,6 +19,7 @@ export function Layout() {
     <div className="sg-screen">
       <header className="sg-appbar app-appbar">
         <Link to="/" className="sg-wordmark">
+          <img className="sg-logo" src="/spotflow-mark.png" alt="" width="24" height="22" />
           Spotflow <em>Games</em>
         </Link>
         <span className="grow" />

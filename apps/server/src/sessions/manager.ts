@@ -83,6 +83,8 @@ export class SessionManager {
 
   async create(hostId: string, input: CreateSession) {
     const data = createSessionSchema.parse(input);
+    // Fail fast on bad settings (e.g. an unknown quiz). Content is snapshotted again at start.
+    await this.registry.get(data.gameType)?.parseConfig(data.config);
     for (let attempt = 0; attempt < 5; attempt++) {
       const code = generateSessionCode();
       if (this.rooms.has(code)) continue;

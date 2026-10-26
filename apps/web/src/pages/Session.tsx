@@ -13,13 +13,20 @@ import {
   UserMinus,
   Users,
 } from "lucide-react";
-import { GAME_INFO, MAX_PLAYERS_PER_SESSION, type ParticipantView, type SessionView } from "@spotflow-games/shared";
+import {
+  GAME_INFO,
+  MAX_PLAYERS_PER_SESSION,
+  type ParticipantView,
+  type QuizView,
+  type SessionView,
+} from "@spotflow-games/shared";
 import { useAuth } from "../lib/auth";
 import { usePreferences } from "../lib/preferences";
 import { getSocket, request } from "../lib/socket";
 import { playSound } from "../lib/sound";
 import { Avatar } from "../components/Avatar";
 import { GameIcon } from "../components/GameIcon";
+import { QuizScreen } from "../games/QuizScreen";
 
 type Conn = "connecting" | "connected" | "reconnecting";
 
@@ -72,7 +79,11 @@ export function Session() {
     if (!view) return;
     if (prevStatus.current && prevStatus.current !== view.status) {
       if (view.status === "in_progress") playSound("countdown", soundEnabled);
-      if (view.status === "results") playSound("complete", soundEnabled);
+      if (view.status === "results") {
+        const top = Math.max(...view.participants.map((p) => p.score));
+        const mine = view.participants.find((p) => p.userId === me?.id)?.score;
+        playSound(top > 0 && mine === top ? "winner" : "complete", soundEnabled);
+      }
     }
     prevStatus.current = view.status;
   }, [view?.status]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -158,11 +169,14 @@ export function Session() {
         </div>
       )}
 
-      {view.status === "in_progress" && (
+      {view.status === "in_progress" && view.game !== null && view.gameType === "quiz" && (
+        <QuizScreen session={view} game={view.game as QuizView} meId={me.id} onError={setNotice} />
+      )}
+      {view.status === "in_progress" && view.gameType !== "quiz" && (
         <div className="sg-card sg-stack">
           <h2 className="sg-h3">Game in progress</h2>
           <p className="sg-muted" style={{ margin: 0 }}>
-            The {info.name} screen plugs in here. Game engines arrive in the next milestone.
+            The {info.name} screen is coming soon.
           </p>
         </div>
       )}

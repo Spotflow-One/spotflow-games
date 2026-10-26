@@ -14,7 +14,9 @@ Milestone 1 (foundation) is in place:
 - A game engine contract (`apps/server/src/games/contract.ts`) that milestone 2 games plug into.
 - Admin offboarding, which deactivates an account and keeps its history.
 
-Game screens, leaderboards, achievements, Slack and reminders come in later milestones.
+Milestone 2 is underway. **Quiz Arena** is playable: hosts pick one of the curated quizzes, set the time per question and choose whether to shuffle questions and answers. The server runs the timers, locks answers, reveals the right one and scores it: 1000 points for an instant correct answer, falling to 500 at the buzzer. Ties go to the faster total answer time.
+
+Draw & Guess, Two Truths and a Lie, custom quizzes, leaderboards, achievements, Slack and reminders come next.
 
 ## Layout
 
@@ -35,6 +37,18 @@ npm install
 npm run db:migrate
 npm run dev            # API on :3001, web on http://localhost:5173
 ```
+
+### Already have Postgres installed?
+
+If Postgres from Homebrew or Postgres.app is already running on port 5432, it answers instead of the Docker one, and migrations fail with `role "spotflow" does not exist`. Either stop it (`brew services stop postgresql`) or use it and create the user and databases once:
+
+```sh
+psql postgres -c "CREATE ROLE spotflow WITH LOGIN CREATEDB PASSWORD 'spotflow';" \
+  -c "CREATE DATABASE spotflow_games OWNER spotflow;" \
+  -c "CREATE DATABASE spotflow_games_test OWNER spotflow;"
+```
+
+If `docker compose` fails with `docker-credential-desktop: executable file not found`, remove the `"credsStore": "desktop"` line from `~/.docker/config.json`.
 
 With `DEV_LOGIN=true`, the sign-in page has a developer form that accepts any `@spotflow.one` email, so you can test with several players in different browser profiles without Google. Production refuses to start with it on.
 
