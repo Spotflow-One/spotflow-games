@@ -87,8 +87,8 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("Core Clash", () => {
-  it("deals players into balanced teams, never more teams than players", async () => {
-    const { room } = makeRoom({ teams: 2 });
+  it("deals players into two balanced teams", async () => {
+    const { room } = makeRoom();
     await room.start("host");
     const v = view(room, "ada");
     expect(v.teamCount).toBe(2);
@@ -96,14 +96,12 @@ describe("Core Clash", () => {
     expect(sizes).toEqual([2, 2]);
     expect(v.me?.team).toBe(v.players.find((p) => p.userId === "ada")!.team);
 
-    const small = makeRoom({ teams: 4 }, ["host", "ada", "ben"]);
-    await small.room.start("host");
-    expect(view(small.room, "host").teamCount).toBe(3);
-    expect(() => small.room.handleAction("ada", { type: "shoot" })).toThrow(GameError);
+    expect(v.bots).toBe(false);
+    expect(() => room.handleAction("ada", { type: "shoot" })).toThrow(GameError);
   });
 
   it("rejects bad settings", async () => {
-    const { room } = makeRoom({ teams: 9 });
+    const { room } = makeRoom({ teams: 3 });
     await expect(room.start("host")).rejects.toThrow("Those game settings aren't valid");
   });
 
@@ -111,19 +109,19 @@ describe("Core Clash", () => {
     const { room } = makeRoom();
     await room.start("host");
     const ada = state(room).fighters.get("ada")!;
-    Object.assign(ada, { x: 300, y: 280 });
+    Object.assign(ada, { x: 400, y: 280 });
     vi.advanceTimersByTime(CLASH_RULES.tickMs);
     // Asks to teleport across the map: only a short step is allowed.
     input(room, "ada", { x: 1400, y: 280 });
     vi.advanceTimersByTime(CLASH_RULES.tickMs);
-    expect(ada.x).toBeGreaterThan(300);
-    expect(ada.x).toBeLessThan(300 + CLASH_RULES.playerSpeed * 0.1 * 1.6 + 10);
-    // Walking into the wall at x 380 stops at its edge.
+    expect(ada.x).toBeGreaterThan(400);
+    expect(ada.x).toBeLessThan(400 + CLASH_RULES.playerSpeed * 0.1 * 1.6 + 10);
+    // Walking into the building at x 480 stops at its edge.
     for (let i = 0; i < 10; i++) {
       input(room, "ada", { x: ada.x + 20, y: 280 });
       vi.advanceTimersByTime(CLASH_RULES.tickMs);
     }
-    expect(ada.x).toBeLessThanOrEqual(380 - CLASH_RULES.playerRadius + 0.01);
+    expect(ada.x).toBeLessThanOrEqual(480 - CLASH_RULES.playerRadius + 0.01);
 
     // Malformed or stale input is ignored.
     const before = { x: ada.x, y: ada.y };
@@ -217,11 +215,11 @@ describe("Core Clash", () => {
   });
 
   it("gives the Titan's Power to the team that did the most damage", async () => {
-    const { room } = makeRoom();
+    const { room } = makeRoom({ bots: true });
     await room.start("host");
     const st = state(room);
     st.nextDroneAt = 1e15;
-    for (const f of st.fighters.values()) Object.assign(f, { x: 1500, y: 60 + f.n * 50, shieldUntil: 1e15 });
+    for (const f of st.fighters.values()) Object.assign(f, { x: 1700, y: 440 + f.n * 15, shieldUntil: 1e15 });
     vi.advanceTimersByTime(CLASH_RULES.titan.firstSpawnMs + 200);
     const titan = st.npcs.find((n) => n.kind === 1)!;
     expect(titan).toBeDefined();
@@ -231,16 +229,30 @@ describe("Core Clash", () => {
     const t0 = [...st.fighters.values()].find((f) => f.team === 0)!;
     const t1 = [...st.fighters.values()].find((f) => f.team === 1)!;
     titan.hp = 40;
-    Object.assign(titan, { x: 800, y: 450 });
+    Object.assign(titan, { x: 1200, y: 700 });
     // Pretend team 0 already did most of the work.
     (titan as unknown as { damageBy: Record<string, number> }).damageBy[t0.userId] = titan.maxHp - 60;
-    Object.assign(t1, { x: 700, y: 450, shieldUntil: 1e15 });
+    Object.assign(t1, { x: 1100, y: 700, shieldUntil: 1e15 });
     holdFire(room, t1, 1500);
     expect(st.npcs.some((n) => n.kind === 1)).toBe(false);
     expect(st.power[0]).toBe(CLASH_RULES.titan.power);
     expect(st.power[1]).toBe(0);
     expect(t0.points).toBeGreaterThan(t1.points);
     expect(st.titanAt).toBeGreaterThan(Date.now());
+  });
+
+  it("keeps drones and the Titan out unless the host turns bots on", async () => {
+    const off = makeRoom();
+    await off.room.start("host");
+    vi.advanceTimersByTime(CLASH_RULES.titan.firstSpawnMs + 5000);
+    expect(state(off.room).npcs).toHaveLength(0);
+    await off.room.end("host");
+
+    const on = makeRoom({ bots: true });
+    await on.room.start("host");
+    expect(view(on.room, "host").bots).toBe(true);
+    vi.advanceTimersByTime(CLASH_RULES.drone.spawnEveryMs + 200);
+    expect(state(on.room).npcs.some((n) => n.kind === 0)).toBe(true);
   });
 
   it("puts late joiners on the smallest team", async () => {
@@ -254,9 +266,9 @@ describe("Core Clash", () => {
   });
 
   it("carries on from a snapshot that went through JSON", async () => {
-    const { room, hooks } = makeRoom();
+    const { room, hooks } = makeRoom({ bots: true });
     await room.start("host");
-    vi.advanceTimersByTime(3000);
+    vi.advanceTimersByTime(CLASH_RULES.drone.spawnEveryMs + 200);
     const snap = decode<RoomSnapshot>(encode(room.toSnapshot()));
     room.dispose();
     const copy = Room.fromSnapshot(snap, engine, hooks);

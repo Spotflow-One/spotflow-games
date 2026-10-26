@@ -47,7 +47,7 @@ export function HostSetup() {
   const [featuredCount, setFeaturedCount] = useState<number>(TRUTHS_RULES.defaultFeatured);
   const [voteSec, setVoteSec] = useState<number>(TRUTHS_RULES.defaultVoteSec);
   const [writeSec, setWriteSec] = useState<number>(TRUTHS_RULES.defaultWriteSec);
-  const [teams, setTeams] = useState<number>(CLASH_RULES.defaultTeams);
+  const [bots, setBots] = useState(false);
   const [target, setTarget] = useState<number>(CLASH_RULES.defaultTarget);
   const [minutes, setMinutes] = useState<number>(CLASH_RULES.defaultMinutes);
   const [laps, setLaps] = useState<number>(RACE_RULES.defaultLaps);
@@ -91,7 +91,7 @@ export function HostSetup() {
         : gameType === "draw"
           ? { wordListId, turnSec, rounds }
           : gameType === "clash"
-            ? { teams, target, minutes }
+            ? { target, minutes, bots }
             : gameType === "race"
               ? { laps }
               : { featuredCount, voteSec, writeSec };
@@ -273,29 +273,13 @@ export function HostSetup() {
             How it plays
           </h2>
           <p className="sg-muted" style={{ margin: 0 }}>
-            Players are split into teams at the start. Each team fills a Power bar by knocking out drones (+
-            {CLASH_RULES.drone.power}), taking down the Titan boss (+{CLASH_RULES.titan.power} to the team that hits it
-            hardest) and tagging players on other teams (+{CLASH_RULES.eliminationPower}). Best on a laptop; phones play
-            sideways with on-screen sticks.
+            Players are split into two teams, {CLASH_TEAMS.map((t) => t.name).join(" and ")}, at either end of a war
+            zone of buildings, containers, crates and sandbags. You see it from just behind your soldier. Move as a
+            team, use cover, and tag the other side (+{CLASH_RULES.eliminationPower} each). Teammates spot enemies on
+            each other's minimaps. Best on a laptop with a mouse; phones play sideways with a stick and a fire button.
           </p>
           <div className="sg-field">
-            <label id="team-count">Teams</label>
-            <div className="sg-seg" role="radiogroup" aria-labelledby="team-count">
-              {CLASH_RULES.teamOptions.map((n) => (
-                <button type="button" key={n} role="radio" aria-checked={teams === n} onClick={() => setTeams(n)}>
-                  {n}
-                </button>
-              ))}
-            </div>
-            <span className="sg-muted" style={{ fontSize: 14 }}>
-              {CLASH_TEAMS.slice(0, teams)
-                .map((t) => t.name)
-                .join(" vs ")}
-              . Teams are balanced automatically, and never outnumber the players.
-            </span>
-          </div>
-          <div className="sg-field">
-            <label id="power-target">Power to win</label>
+            <label id="power-target">Tags to win</label>
             <div className="sg-seg" role="radiogroup" aria-labelledby="power-target">
               {CLASH_RULES.targetOptions.map((n) => (
                 <button type="button" key={n} role="radio" aria-checked={target === n} onClick={() => setTarget(n)}>
@@ -314,7 +298,15 @@ export function HostSetup() {
               ))}
             </div>
             <span className="sg-muted" style={{ fontSize: 14 }}>
-              If no team reaches the target in time, the team with the most Power wins.
+              If no team reaches the target in time, the team with the most tags wins.
+            </span>
+          </div>
+          <div className="sg-field">
+            <Switch checked={bots} onChange={setBots} label="Add bots" />
+            <span className="sg-muted" style={{ fontSize: 14 }}>
+              Drones roam the war zone (+{CLASH_RULES.drone.power} each) and a Titan wakes in the plaza after{" "}
+              {CLASH_RULES.titan.firstSpawnMs / 1000} seconds (+{CLASH_RULES.titan.power} to the team that hits it
+              hardest).
             </span>
           </div>
         </section>

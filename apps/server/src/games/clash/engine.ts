@@ -17,7 +17,10 @@ import {
 import { GameError, type GameContext, type GameEngine } from "../contract.js";
 
 export interface ClashConfig {
+  /** Always two: one side against the other. */
   teams: number;
+  /** Drones and the Titan join the fight. */
+  bots: boolean;
   target: number;
   minutes: number;
 }
@@ -85,6 +88,8 @@ interface ClashState {
   config: ClashConfig;
   endsAt: number;
   lastTick: number;
+  /** When the next tick was due. Ticks keep to this beat however long reaching the room took. */
+  beat?: number;
   nextId: number;
   nextN: number;
   fighters: Map<string, Fighter>;
@@ -119,7 +124,7 @@ export function createClashEngine() {
   const spawnPoint = (state: ClashState, team: number) => {
     const base = clashBases(state.config.teams)[team]!;
     const angle = (randomInt(360) * Math.PI) / 180;
-    const r = randomInt(50);
+    const r = randomInt(70);
     return resolveCircle(base.x + Math.cos(angle) * r, base.y + Math.sin(angle) * r, R.playerRadius);
   };
 
@@ -407,8 +412,8 @@ export function createClashEngine() {
   };
 
   const pickWander = (npc: Npc) => {
-    npc.wanderX = 300 + randomInt(1000);
-    npc.wanderY = 150 + randomInt(600);
+    npc.wanderX = 300 + randomInt(R.arena.width - 600);
+    npc.wanderY = 150 + randomInt(R.arena.height - 300);
   };
 
   /** Alternates a ring of shots with an aimed burst at whoever is closest, after a visible wind-up. */
@@ -448,6 +453,7 @@ export function createClashEngine() {
   };
 
   const spawnNpcs = (ctx: GameContext, state: ClashState) => {
+    if (!state.config.bots) return;
     const now = ctx.now();
     const players = state.fighters.size;
     const drones = state.npcs.filter((n) => n.kind === 0).length;
@@ -559,7 +565,8 @@ export function createClashEngine() {
       ctx.finish();
       return;
     }
-    ctx.setTimer("tick", R.tickMs);
+    state.beat = Math.max((state.beat ?? now) + R.tickMs, now + R.tickMs / 2);
+    ctx.setTimer("tick", state.beat - now);
   };
 
   const engine: GameEngine<ClashConfig, ClashState> = {
@@ -571,18 +578,18 @@ export function createClashEngine() {
     parseConfig(raw) {
       const parsed = clashSessionConfigSchema.safeParse(raw ?? {});
       if (!parsed.success) throw new GameError("Those game settings aren't valid");
-      return { ...parsed.data };
+      return { ...parsed.data, teams: R.teams };
     },
 
     start(ctx, config) {
       const now = ctx.now();
       const players = ctx.players();
-      // Never more teams than players, so nobody plays an empty team.
-      const teams = Math.max(2, Math.min(config.teams, players.length));
+      const teams = R.teams;
       const state: ClashState = {
         config: { ...config, teams },
         endsAt: now + config.minutes * 60_000,
         lastTick: now,
+        beat: now + R.tickMs,
         nextId: 1,
         nextN: 0,
         fighters: new Map(),
@@ -590,7 +597,7 @@ export function createClashEngine() {
         shots: [],
         power: new Array<number>(teams).fill(0),
         nextDroneAt: now + 2000,
-        titanAt: now + R.titan.firstSpawnMs,
+        titanAt: config.bots ? now + R.titan.firstSpawnMs : 0,
         outcome: null,
       };
       // Shuffle, then deal players round the teams so sizes differ by one at most.
@@ -644,6 +651,7 @@ export function createClashEngine() {
       const me = state.fighters.get(viewer.userId);
       return {
         teamCount: state.config.teams,
+        bots: state.config.bots,
         target: state.config.target,
         durationSec: state.config.minutes * 60,
         endsAt: state.endsAt,

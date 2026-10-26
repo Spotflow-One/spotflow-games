@@ -35,7 +35,7 @@ import { TokyoRun } from "../components/TokyoRun";
 import { GameIcon } from "../components/GameIcon";
 import { Confetti } from "../components/Confetti";
 import { rankedPlayers } from "../components/Standings";
-import { ClashOutcome, ClashScreen } from "../games/ClashScreen";
+import { ClashOutcome, ClashScreen, preloadClash3d } from "../games/ClashScreen";
 import { DrawScreen } from "../games/DrawScreen";
 import { QuizScreen } from "../games/QuizScreen";
 import { RaceOutcome, RaceScreen, preloadRace3d } from "../games/RaceScreen";
@@ -104,9 +104,10 @@ export function Session() {
     prevStatus.current = view.status;
   }, [view?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Lagos Rush's 3D renderer is big, so it downloads while everyone waits in the lobby.
+  // The 3D renderers are big, so they download while everyone waits in the lobby.
   useEffect(() => {
     if (view?.gameType === "race") void preloadRace3d();
+    if (view?.gameType === "clash") void preloadClash3d();
   }, [view?.gameType]);
 
   // The whole screen takes on the game's look while you're in a session.
