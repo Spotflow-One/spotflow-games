@@ -19,9 +19,8 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
       - "5173:5173"
-      - "8080:8080"
+      - "3001:8080"
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
