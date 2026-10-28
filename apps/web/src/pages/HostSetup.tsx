@@ -4,6 +4,7 @@ import {
   GAME_INFO,
   GAME_TYPES,
   DRAW_RULES,
+  QUESTIONS_PER_GAME,
   QUIZ_RULES,
   TRUTHS_RULES,
   CLASH_RULES,
@@ -38,7 +39,6 @@ export function HostSetup() {
   const [quizzes, setQuizzes] = useState<QuizSummary[] | null>(null);
   const [quizId, setQuizId] = useState<string | null>(null);
   const [timeLimitSec, setTimeLimitSec] = useState<number>(QUIZ_RULES.defaultTimeLimitSec);
-  const [shuffleQuestions, setShuffleQuestions] = useState(false);
   const [shuffleOptions, setShuffleOptions] = useState(true);
   const [wordLists, setWordLists] = useState<WordListSummary[] | null>(null);
   const [wordListId, setWordListId] = useState<string | null>(null);
@@ -87,7 +87,7 @@ export function HostSetup() {
     setError(null);
     const config =
       gameType === "quiz"
-        ? { quizId, timeLimitSec, shuffleQuestions, shuffleOptions }
+        ? { quizId, timeLimitSec, shuffleOptions }
         : gameType === "draw"
           ? { wordListId, turnSec, rounds }
           : gameType === "clash"
@@ -142,7 +142,8 @@ export function HostSetup() {
                 <b>{q.title}</b>
                 <span className="sg-muted">{q.description}</span>
                 <span className="sg-muted">
-                  {q.questionCount} questions{q.curated ? " · Curated" : ""}
+                  {QUESTIONS_PER_GAME} random questions from {q.questionCount.toLocaleString()}
+                  {q.curated ? " · Curated" : ""}
                 </span>
               </button>
             ))}
@@ -164,7 +165,6 @@ export function HostSetup() {
             </div>
           </div>
           <div className="sg-row">
-            <Switch checked={shuffleQuestions} onChange={setShuffleQuestions} label="Shuffle questions" />
             <Switch checked={shuffleOptions} onChange={setShuffleOptions} label="Shuffle answers" />
           </div>
         </section>

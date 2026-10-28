@@ -14,7 +14,7 @@ Milestone 1 (foundation) is in place:
 - A game engine contract (`apps/server/src/games/contract.ts`) that milestone 2 games plug into.
 - Admin offboarding, which deactivates an account and keeps its history.
 
-Milestone 2 is underway. **Quiz Arena** is playable: hosts pick one of the curated quizzes, set the time per question and choose whether to shuffle questions and answers. The server runs the timers, locks answers, reveals the right one and scores it: 1000 points for an instant correct answer, falling to 500 at the buzzer. Ties go to the faster total answer time.
+Milestone 2 is underway. **Quiz Arena** is playable: hosts pick one of four curated quizzes (General knowledge, Around Africa, Money and payments, Tech and the internet), set the time per question and choose whether to shuffle answers. Each quiz is a bank of about 1,000 questions, and every game draws 10 of them at random. The banks live in `apps/server/src/games/quiz/banks`, one question per line. The server runs the timers, locks answers, reveals the right one and scores it: 1000 points for an instant correct answer, falling to 500 at the buzzer. Ties go to the faster total answer time.
 
 **Draw & Guess** is playable too. Hosts pick a word list, the time to draw and how many times everyone draws. Each drawer picks one of three words. Everyone else sees the drawing live and guesses. Letters are revealed as hints at 50% and 75% of the turn. The first correct guess earns 300 points, each later one 50 less (never under 100), and the drawer gets 50 per correct guess. Near misses show "So close" to the guesser only.
 

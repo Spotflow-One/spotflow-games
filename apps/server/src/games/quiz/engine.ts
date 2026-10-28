@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import {
+  QUESTIONS_PER_GAME,
   QUIZ_RULES,
   quizSessionConfigSchema,
   type QuizAction,
@@ -115,8 +116,10 @@ export function createQuizEngine(
       if (!quiz) throw new GameError("That quiz no longer exists");
       // Deep copy, so edits to the quiz after this point cannot reach a running game.
       const snapshot = structuredClone(quiz.questions);
-      let questions = parsed.data.shuffleQuestions ? shuffle(snapshot) : snapshot;
-      if (parsed.data.questionCount) questions = questions.slice(0, parsed.data.questionCount);
+      // Curated quizzes are large banks, so each game draws a fresh random set from them.
+      const count = parsed.data.questionCount ?? QUESTIONS_PER_GAME;
+      const draw = parsed.data.shuffleQuestions || snapshot.length > count;
+      let questions = (draw ? shuffle(snapshot) : snapshot).slice(0, count);
       if (parsed.data.shuffleOptions) questions = questions.map(shuffleOptions);
       if (questions.length === 0) throw new GameError("That quiz has no questions");
       return { quizId: quiz.id, title: quiz.title, timeLimitSec: parsed.data.timeLimitSec, questions };

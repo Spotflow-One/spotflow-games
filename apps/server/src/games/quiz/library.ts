@@ -1,4 +1,5 @@
 import type { QuizQuestion, QuizSummary } from "@spotflow-games/shared";
+import { AFRICA, GENERAL, MONEY, TECH } from "./banks/index.js";
 
 export interface CuratedQuiz {
   id: string;
@@ -13,12 +14,45 @@ const q = (prompt: string, options: string[], correctIndex: number): QuizQuestio
   correctIndex,
 });
 
+function hash(text: string): number {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+const NUMBER = /^-?[\d,.]+[°%]?$/;
+const toNumber = (option: string) => parseFloat(option.replace(/,/g, ""));
+
+/**
+ * Parses a question bank: one question per line, as "prompt | right answer | wrong | wrong | wrong".
+ * Numbers are listed in order. Otherwise the right answer's position comes from a hash of the
+ * question, so answers are spread across A to D and stay put between restarts.
+ */
+export function parseBank(text: string): QuizQuestion[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [prompt, answer, ...wrong] = line.split("|").map((part) => part.trim());
+      if (!prompt || !answer || wrong.length === 0) throw new Error(`Malformed quiz question: ${line}`);
+      let options: string[];
+      if ([answer, ...wrong].every((o) => NUMBER.test(o))) {
+        options = [answer, ...wrong].sort((a, b) => toNumber(a) - toNumber(b));
+      } else {
+        options = [...wrong];
+        options.splice(hash(prompt + answer) % (wrong.length + 1), 0, answer);
+      }
+      return { prompt, options, correctIndex: options.indexOf(answer) };
+    });
+}
+
 /** Ready-to-play quizzes, so a session needs no preparation. Answers stay on the server. */
 export const CURATED_QUIZZES: CuratedQuiz[] = [
   {
     id: "curated:general-knowledge",
     title: "General knowledge",
-    description: "A warm-up for everyone.",
+    description: "Science, history, geography, sport, culture and more.",
     questions: [
       q("How many continents are there?", ["5", "6", "7", "8"], 2),
       q("Which gas do plants absorb from the air?", ["Oxygen", "Carbon dioxide", "Nitrogen", "Helium"], 1),
@@ -30,12 +64,13 @@ export const CURATED_QUIZZES: CuratedQuiz[] = [
       q("What is the chemical symbol for gold?", ["Go", "Gd", "Au", "Ag"], 2),
       q("How many players does a football (soccer) team have on the pitch?", ["9", "10", "11", "12"], 2),
       q("What is the smallest prime number?", ["0", "1", "2", "3"], 2),
+      ...parseBank(GENERAL),
     ],
   },
   {
     id: "curated:around-africa",
     title: "Around Africa",
-    description: "Capitals, rivers, mountains and more.",
+    description: "Capitals, history, people, food, music and more.",
     questions: [
       q("Which is the largest country in Africa by area?", ["DR Congo", "Algeria", "Sudan", "Libya"], 1),
       q("What is the capital of Kenya?", ["Mombasa", "Kampala", "Nairobi", "Dodoma"], 2),
@@ -51,12 +86,13 @@ export const CURATED_QUIZZES: CuratedQuiz[] = [
         ["Equatorial Guinea", "Western Sahara", "Cape Verde", "Gabon"],
         0,
       ),
+      ...parseBank(AFRICA),
     ],
   },
   {
     id: "curated:money-and-payments",
     title: "Money and payments",
-    description: "How money moves, from cards to mobile wallets.",
+    description: "Payments, banking, currencies, business and the economy.",
     questions: [
       q(
         "What does ATM stand for?",
@@ -97,12 +133,13 @@ export const CURATED_QUIZZES: CuratedQuiz[] = [
         ["Cardholder data", "Exchange rates", "Bank holidays", "ATM locations"],
         0,
       ),
+      ...parseBank(MONEY),
     ],
   },
   {
     id: "curated:tech-and-internet",
     title: "Tech and the internet",
-    description: "From bits and bytes to the web.",
+    description: "Computers, code, the web, gadgets and the people behind them.",
     questions: [
       q(
         "What does HTML stand for?",
@@ -139,6 +176,7 @@ export const CURATED_QUIZZES: CuratedQuiz[] = [
         2,
       ),
       q("Wi-Fi sends data using what?", ["Radio waves", "Infrared light", "Sound waves", "Copper cables"], 0),
+      ...parseBank(TECH),
     ],
   },
 ];

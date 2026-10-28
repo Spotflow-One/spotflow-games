@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { QuizView } from "@spotflow-games/shared";
+import { QUESTIONS_PER_GAME, quizQuestionSchema, type QuizView } from "@spotflow-games/shared";
 import { GameError } from "../src/games/contract.js";
 import { createQuizEngine, quizPoints } from "../src/games/quiz/engine.js";
-import { CURATED_QUIZZES, type QuizSource } from "../src/games/quiz/library.js";
+import { CURATED_QUIZZES, curatedQuizSource, parseBank, type QuizSource } from "../src/games/quiz/library.js";
 import { Room, type RoomHooks } from "../src/sessions/room.js";
 
 const quiz = {
@@ -164,12 +164,56 @@ describe("curated quizzes", () => {
     const ids = new Set(CURATED_QUIZZES.map((q) => q.id));
     expect(ids.size).toBe(CURATED_QUIZZES.length);
     for (const q of CURATED_QUIZZES) {
-      expect(q.questions.length).toBeGreaterThanOrEqual(10);
+      expect(q.questions.length).toBeGreaterThanOrEqual(1000);
       for (const question of q.questions) {
-        expect(question.correctIndex).toBeLessThan(question.options.length);
-        expect(new Set(question.options).size).toBe(question.options.length);
+        expect(quizQuestionSchema.safeParse(question).success, question.prompt).toBe(true);
+        expect(new Set(question.options).size, question.prompt).toBe(question.options.length);
       }
     }
+  });
+
+  it("never repeat a question within a quiz", () => {
+    for (const q of CURATED_QUIZZES) {
+      const keys = q.questions.map((question) => `${question.prompt} ${question.options[question.correctIndex]}`);
+      expect(new Set(keys).size).toBe(keys.length);
+    }
+  });
+
+  it("spread right answers across every position", () => {
+    for (const q of CURATED_QUIZZES) {
+      const positions = [0, 0, 0, 0];
+      for (const question of q.questions) positions[question.correctIndex]!++;
+      for (const count of positions) expect(count).toBeGreaterThan(q.questions.length / 8);
+    }
+  });
+
+  it("draw a fresh set of 10 for each game", async () => {
+    const curated = createQuizEngine(curatedQuizSource);
+    const quizId = CURATED_QUIZZES[0]!.id;
+    const first = await curated.parseConfig({ quizId });
+    const second = await curated.parseConfig({ quizId });
+    expect(first.questions).toHaveLength(QUESTIONS_PER_GAME);
+    expect(new Set(first.questions.map((q) => q.prompt)).size).toBe(QUESTIONS_PER_GAME);
+    expect(first.questions.map((q) => q.prompt)).not.toEqual(second.questions.map((q) => q.prompt));
+  });
+});
+
+describe("question banks", () => {
+  it("parse lines into questions with the right answer in place", () => {
+    const [question] = parseBank("Capital of Ghana? | Accra | Kumasi | Tamale | Lomé");
+    expect(question!.options).toHaveLength(4);
+    expect(question!.options[question!.correctIndex]).toBe("Accra");
+    expect([...question!.options].sort()).toEqual(["Accra", "Kumasi", "Lomé", "Tamale"]);
+  });
+
+  it("list numeric answers in order", () => {
+    const [question] = parseBank("How many sides does a hexagon have? | 6 | 8 | 5 | 7");
+    expect(question!.options).toEqual(["5", "6", "7", "8"]);
+    expect(question!.correctIndex).toBe(1);
+  });
+
+  it("reject malformed lines", () => {
+    expect(() => parseBank("A question with no options")).toThrow("Malformed");
   });
 });
 
