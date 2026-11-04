@@ -13,6 +13,9 @@ export const QUIZ_RULES = {
 
 export const MAX_QUESTIONS_PER_QUIZ = 50;
 
+/** A game asks this many questions, drawn at random from the quiz's question bank. */
+export const QUESTIONS_PER_GAME = 10;
+
 export const quizQuestionSchema = z
   .object({
     prompt: z.string().trim().min(1).max(300),

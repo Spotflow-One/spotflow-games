@@ -153,10 +153,11 @@ describe("quizzes", () => {
     const cookie = await signIn("quizzer@spotflow.one", "Quizzer");
     const list = await (await fetch(`${base}/api/quizzes`, { headers: { cookie } })).json();
     expect(list.length).toBeGreaterThanOrEqual(4);
+    expect(list[0].questionCount).toBeGreaterThanOrEqual(1000);
     expect(list[0]).toMatchObject({
       id: expect.any(String),
       title: expect.any(String),
-      questionCount: 10,
+      questionCount: expect.any(Number),
       curated: true,
     });
     expect(JSON.stringify(list)).not.toContain("correctIndex");
