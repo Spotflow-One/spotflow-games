@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLASH_FLAG, CLASH_RULES, type ClashSnapshot, type ClashView } from "@spotflow-games/shared";
+import {
+  CLASH_FLAG,
+  CLASH_PICKUPS,
+  CLASH_RULES,
+  CLASH_WEAPONS,
+  clashWeaponOf,
+  pointInWall,
+  type ClashSnapshot,
+  type ClashView,
+} from "@spotflow-games/shared";
 import { GameError } from "../src/games/contract.js";
 import { createClashEngine } from "../src/games/clash/engine.js";
 import { decode, encode } from "../src/sessions/codec.js";
@@ -21,6 +30,8 @@ interface Fighter {
   life: number;
   shieldUntil: number;
   dodgeUntil?: number;
+  overdriveUntil?: number;
+  hasteUntil?: number;
   points: number;
   eliminations: number;
 }
@@ -62,7 +73,7 @@ const lastSnap = (hooks: RoomHooks) => {
 const input = (
   room: Room,
   id: string,
-  v: Partial<{ x: number; y: number; a: number; f: boolean; s: number; d: number; c: boolean }>,
+  v: Partial<{ x: number; y: number; a: number; f: boolean; s: number; d: number; c: boolean; w: number; g: number }>,
 ) => {
   const f = state(room).fighters.get(id)!;
   room.inputs.set(id, { value: { x: f.x, y: f.y, a: 0, f: false, s: 0, l: f.life, ...v }, at: Date.now() });
@@ -214,6 +225,66 @@ describe("Core Clash", () => {
     expect(b.hp).toBe(CLASH_RULES.playerHp - CLASH_RULES.shotDamage);
   });
 
+  it("hands out power-ups to whoever reaches them, and brings them back later", async () => {
+    const { room, hooks } = makeRoom();
+    await room.start("host");
+    const { a, b } = duel(room);
+    const P = CLASH_RULES.pickup;
+    for (const spot of CLASH_PICKUPS) {
+      expect(pointInWall(spot.x, spot.y)).toBe(false);
+      expect(spot.x === 1200 || CLASH_PICKUPS.some((o) => o.x === 2400 - spot.x && o.y === spot.y)).toBe(true);
+    }
+    const spot = (kind: string) => CLASH_PICKUPS.findIndex((p) => p.kind === kind);
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).items).toEqual(CLASH_PICKUPS.map(() => 0));
+
+    // A medkit is left alone at full health, and heals when hurt.
+    const med = CLASH_PICKUPS[spot("medkit")]!;
+    Object.assign(a, { x: med.x, y: med.y });
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).items![spot("medkit")]).toBe(0);
+    a.hp = 30;
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    // Plus a moment of out-of-combat regen.
+    expect(Math.floor(a.hp)).toBe(30 + P.medkitHeal);
+    expect(lastSnap(hooks).grabs).toEqual([[a.n, spot("medkit")]]);
+    expect(lastSnap(hooks).items![spot("medkit")]).toBeGreaterThan(0);
+
+    // Overdrive makes shots hit harder.
+    const od = CLASH_PICKUPS[spot("overdrive")]!;
+    Object.assign(a, { x: od.x, y: od.y, hp: CLASH_RULES.playerHp });
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).players.find((p) => p[0] === a.n)![5] & CLASH_FLAG.overdrive).toBeTruthy();
+    Object.assign(b, { x: od.x + 200, y: od.y, shieldUntil: 0 });
+    input(room, a.userId, { f: true, a: 0 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    input(room, a.userId, { f: false, a: 0 });
+    vi.advanceTimersByTime(400);
+    expect(b.hp).toBe(CLASH_RULES.playerHp - CLASH_RULES.shotDamage * P.overdrive.damageMult);
+    // It's gone for a while, then comes back.
+    expect(lastSnap(hooks).items![spot("overdrive")]).toBeGreaterThan(0);
+    Object.assign(a, { x: 1500, y: 850 });
+    room.inputs.delete(a.userId);
+    vi.advanceTimersByTime(P.respawnMs.overdrive);
+    expect(lastSnap(hooks).items![spot("overdrive")]).toBe(0);
+    expect(a.overdriveUntil! < Date.now()).toBe(true);
+
+    // Haste lets you move faster than normal top speed.
+    const hs = CLASH_PICKUPS[spot("haste")]!;
+    Object.assign(a, { x: hs.x, y: hs.y });
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(a.hasteUntil! > Date.now()).toBe(true);
+    const x0 = a.x;
+    input(room, a.userId, { x: a.x + 200, y: a.y });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(a.x - x0).toBeGreaterThan(CLASH_RULES.playerSpeed * 0.1 * 1.6 + 6);
+    expect(view(room, a.userId).players.find((p) => p.n === a.n)!.pickups).toBe(3);
+  });
+
   it("makes a crouching player a smaller target, and shows it", async () => {
     const { room, hooks } = makeRoom();
     await room.start("host");
@@ -237,6 +308,84 @@ describe("Core Clash", () => {
     }
     expect(b.hp).toBeLessThan(CLASH_RULES.playerHp);
     expect(lastSnap(hooks).players.find((p) => p[0] === b.n)![5] & CLASH_FLAG.crouch).toBeFalsy();
+  });
+
+  it("fires the chosen weapon, switching at base or on the next life", async () => {
+    const { room, hooks } = makeRoom();
+    await room.start("host");
+    const { a, b } = duel(room);
+    const [, shotgun, sniper] = CLASH_WEAPONS;
+    const myFlags = () => lastSnap(hooks).players.find((p) => p[0] === a.n)![5];
+
+    // Away from base, a new weapon waits for the next life.
+    input(room, a.userId, { w: 1 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(clashWeaponOf(myFlags()).id).toBe("rifle");
+
+    // At base it's yours at once. A shotgun fires a fan of pellets.
+    const base = a.team === 0 ? { x: 140, y: 700 } : { x: 2260, y: 700 };
+    Object.assign(a, base);
+    Object.assign(b, { x: base.x + (a.team === 0 ? 150 : -150), y: 700, shieldUntil: 0 });
+    const toward = Math.atan2(b.y - a.y, b.x - a.x);
+    input(room, a.userId, { w: 1, a: toward });
+    input(room, b.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(clashWeaponOf(myFlags()).id).toBe("shotgun");
+    input(room, a.userId, { w: 1, a: toward, f: true });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).shots.filter((s) => s[7] === a.n)).toHaveLength(shotgun!.pellets);
+    input(room, a.userId, { w: 1, a: toward, f: false });
+    vi.advanceTimersByTime(500);
+    // Close up, at least the middle pellets land.
+    expect(b.hp).toBeLessThanOrEqual(CLASH_RULES.playerHp - shotgun!.damage * 3);
+
+    // A sniper shot hits hard, and fast shots never skip past anyone.
+    b.hp = CLASH_RULES.playerHp;
+    input(room, a.userId, { w: 2, a: toward });
+    vi.advanceTimersByTime(sniper!.cooldownMs);
+    input(room, a.userId, { w: 2, a: toward, f: true });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    input(room, a.userId, { w: 2, a: toward, f: false });
+    vi.advanceTimersByTime(400);
+    expect(b.hp).toBe(CLASH_RULES.playerHp - sniper!.damage);
+  });
+
+  it("throws grenades that hurt enemies in the open, but not teammates or anyone behind cover", async () => {
+    const { room, hooks } = makeRoom();
+    await room.start("host");
+    const { a, b, mate } = duel(room);
+    const G = CLASH_RULES.grenade;
+    Object.assign(a, { x: 200, y: 560 });
+    input(room, a.userId, { g: 0 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    // b stands where the grenade lands; a teammate is right beside it too.
+    Object.assign(b, { x: a.x + G.throwRange, y: a.y, shieldUntil: 0 });
+    Object.assign(mate, { x: a.x + G.throwRange, y: a.y + 30, shieldUntil: 0 });
+    input(room, a.userId, { g: 1, a: 0 });
+    input(room, b.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    const thrown = lastSnap(hooks).grenades!;
+    expect(thrown).toHaveLength(1);
+    expect(thrown[0]![3]).toBeCloseTo(a.x + G.throwRange, -1);
+    vi.advanceTimersByTime(G.fuseMs + 200);
+    expect(b.hp).toBeLessThan(CLASH_RULES.playerHp - G.minDamage);
+    expect(mate.hp).toBe(CLASH_RULES.playerHp);
+
+    // Another throw straight away does nothing until the grenade recharges.
+    input(room, a.userId, { g: 2, a: 0 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).grenades).toEqual([]);
+
+    // A grenade thrown at cover stops against it, and the blast doesn't reach round the corner.
+    vi.advanceTimersByTime(G.cooldownMs);
+    Object.assign(a, { x: 400, y: 280 });
+    Object.assign(b, { x: 760, y: 280, hp: CLASH_RULES.playerHp, shieldUntil: 0 });
+    input(room, a.userId, { g: 3, a: 0 });
+    input(room, b.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).grenades![0]![3]).toBeLessThan(480);
+    vi.advanceTimersByTime(G.fuseMs + 200);
+    expect(b.hp).toBe(CLASH_RULES.playerHp);
   });
 
   it("ends when a team reaches the target and awards points and the win bonus once", async () => {

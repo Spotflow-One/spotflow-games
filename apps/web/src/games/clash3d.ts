@@ -16,6 +16,7 @@ import {
   clashBases,
   coverAlong,
   mulberry32,
+  type ClashPickupKind,
   type Cover,
 } from "@spotflow-games/shared";
 
@@ -42,7 +43,24 @@ export interface ClashFrame {
   focus: { x: number; y: number; yaw: number; down: number; zoom?: number; low?: number } | null;
   players: ClashFramePlayer[];
   npcs: Array<{ id: number; kind: 0 | 1; x: number; y: number; flags: number }>;
-  shots: Array<{ id: number; x: number; y: number; vx: number; vy: number; team: number }>;
+  /** Power-up spots; `ready` while there's one to take. */
+  pickups: Array<{ kind: ClashPickupKind; x: number; y: number; ready: boolean }>;
+  /** `hot` shots come from a soldier on overdrive. */
+  /** `long` shots are sniper rounds. */
+  shots: Array<{
+    id: number;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    team: number;
+    hot?: boolean;
+    long?: boolean;
+  }>;
+  /** Grenades in the air or on the ground; z is the height. */
+  grenades: Array<{ id: number; x: number; y: number; z: number }>;
+  /** Blasts, with k running from 0 to 1 over their life. */
+  booms: Array<{ x: number; y: number; k: number }>;
   teamColors: string[];
 }
 
@@ -582,6 +600,36 @@ function titanModel() {
   ]);
 }
 
+const PICKUP_COLOR: Record<ClashPickupKind, string> = { medkit: "#3fd08b", overdrive: "#ff7a2e", haste: "#5ad8ff" };
+
+/** A first-aid case: white, with a red cross on every side. */
+function medkitModel() {
+  return bake([
+    [box(26, 18, 20), "#f4f1ea", [0, 0, 0]],
+    [box(4, 10, 3), "#e0352b", [0, 0, 10.5]],
+    [box(10, 4, 3), "#e0352b", [0, 0, 10.5]],
+    [box(4, 10, 3), "#e0352b", [0, 0, -10.5]],
+    [box(10, 4, 3), "#e0352b", [0, 0, -10.5]],
+    [box(10, 3, 3), "#3a3a3a", [0, 10, 0]],
+  ]);
+}
+
+/** A burning crystal. */
+function overdriveModel() {
+  return bake([
+    [new THREE.OctahedronGeometry(15), "#ff7a2e", [0, 0, 0], [0, 0, 0], [1, 1.5, 1]],
+    [new THREE.TorusGeometry(19, 1.6, 6, 24), "#ffd36b", [0, 0, 0], [Math.PI / 2, 0, 0]],
+  ]);
+}
+
+/** Two chevrons pointing the way you'll run. */
+function hasteModel() {
+  const parts: Part[] = [];
+  for (const x of [-7, 7])
+    for (const side of [1, -1]) parts.push([box(16, 5, 5), "#5ad8ff", [x, 0, side * 5], [0, side * 0.75, 0]]);
+  return bake(parts);
+}
+
 /**
  * Lets a standard material take its roughness, metalness and glow from each vertex (the `surf`
  * attribute `bake` writes for finishes), so a whole soldier, cloth and steel alike, is one draw.
@@ -919,6 +967,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     knees: THREE.Group[];
     muzzle: THREE.Sprite;
     shield: THREE.Mesh;
+    aura: THREE.Mesh;
     geos: THREE.BufferGeometry[];
     last: { x: number; y: number };
     vel: { x: number; y: number };
@@ -983,6 +1032,10 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     const shield = new THREE.Mesh(shieldGeo, shieldMat);
     shield.position.y = 32;
     root.add(shield);
+    const aura = new THREE.Mesh(auraGeo, auraMats.overdrive);
+    aura.position.y = 0.8;
+    aura.visible = false;
+    root.add(aura);
     scene.add(root);
     return {
       team,
@@ -995,6 +1048,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       knees,
       muzzle,
       shield,
+      aura,
       geos: [m.body, m.kit, m.thigh, m.shin],
       last: { x: NaN, y: NaN },
       vel: { x: 0, y: 0 },
@@ -1051,6 +1105,78 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const tracerMats = [0, 1].map(() => own(new THREE.MeshBasicMaterial({ color: "#ffffff" })));
   const orbMat = own(new THREE.MeshBasicMaterial({ color: "#ff4fd8" }));
   const shotPool: THREE.Mesh[] = [];
+
+  // Power-ups: a spinning model over a ring on the ground. The ring stays, dim, while one is away.
+  const pickupGeos: Record<ClashPickupKind, THREE.BufferGeometry> = {
+    medkit: own(medkitModel()),
+    overdrive: own(overdriveModel()),
+    haste: own(hasteModel()),
+  };
+  const pickupMats = Object.fromEntries(
+    (Object.keys(PICKUP_COLOR) as ClashPickupKind[]).map((k) => [
+      k,
+      own(
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          emissive: PICKUP_COLOR[k],
+          emissiveIntensity: k === "medkit" ? 0.15 : 0.7,
+          roughness: 0.4,
+        }),
+      ),
+    ]),
+  ) as Record<ClashPickupKind, THREE.MeshStandardMaterial>;
+  const pickupRingGeo = own(new THREE.RingGeometry(26, 32, 32).rotateX(-Math.PI / 2));
+  interface Pickup {
+    model: THREE.Mesh;
+    halo: THREE.Sprite;
+    ringMat: THREE.MeshBasicMaterial;
+  }
+  const pickups: Pickup[] = [];
+  const makePickup = (kind: ClashPickupKind, x: number, y: number): Pickup => {
+    const ringMat = own(
+      new THREE.MeshBasicMaterial({ color: PICKUP_COLOR[kind], transparent: true, opacity: 0.8, ...layer(2) }),
+    );
+    const ring = new THREE.Mesh(pickupRingGeo, ringMat);
+    ring.position.set(x, 0.6, y);
+    scene.add(ring);
+    const model = new THREE.Mesh(pickupGeos[kind], pickupMats[kind]);
+    model.position.set(x, 30, y);
+    scene.add(model);
+    const haloMat = own(
+      new THREE.SpriteMaterial({
+        map: glow.map,
+        color: PICKUP_COLOR[kind],
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: 0.55,
+      }),
+    );
+    const halo = new THREE.Sprite(haloMat);
+    halo.position.set(x, 30, y);
+    halo.scale.setScalar(kind === "overdrive" ? 90 : 64);
+    scene.add(halo);
+    return { model, halo, ringMat };
+  };
+
+  // Soldiers with a power-up running stand in a ring of its colour.
+  const auraGeo = own(new THREE.RingGeometry(22, 29, 28).rotateX(-Math.PI / 2));
+  const auraMats = {
+    overdrive: own(new THREE.MeshBasicMaterial({ color: PICKUP_COLOR.overdrive, transparent: true, ...layer(3) })),
+    haste: own(new THREE.MeshBasicMaterial({ color: PICKUP_COLOR.haste, transparent: true, ...layer(3) })),
+  };
+  const hotMat = own(new THREE.MeshBasicMaterial({ color: "#ffb15a" }));
+
+  // Grenades: a small olive egg with a blinking light; blasts: a glowing fireball that swells and fades.
+  const grenadeGeo = own(
+    bake([
+      [sphere(6, 10, 8), "#4d5a2a", [0, 0, 0], [0, 0, 0], [1, 1.25, 1]],
+      [box(3, 4, 3), "#2b2b2b", [0, 8, 0]],
+    ]),
+  );
+  const grenadeMat = own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }));
+  const grenadePool: Array<{ mesh: THREE.Mesh; blink: THREE.Sprite }> = [];
+  const boomGeo = own(new THREE.SphereGeometry(1, 18, 12));
+  const boomPool: Array<{ ball: THREE.Mesh; mat: THREE.MeshBasicMaterial; flare: THREE.Sprite }> = [];
 
   let width = 1;
   let height = 1;
@@ -1210,10 +1336,28 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       s.kit.material = p.flags & CLASH_FLAG.hurt ? flash : (teamMats[p.team] ?? teamMats[0]!);
       for (const g of s.gear) g.material = p.flags & CLASH_FLAG.hurt ? gearHurt : gear;
       s.shield.visible = !!(p.flags & CLASH_FLAG.shield);
+      const buff = p.flags & CLASH_FLAG.overdrive ? "overdrive" : p.flags & CLASH_FLAG.haste ? "haste" : null;
+      s.aura.visible = !!buff;
+      if (buff) s.aura.material = auraMats[buff];
       s.muzzle.visible = !!(p.flags & CLASH_FLAG.firing) && Math.floor(f.t / 45) % 2 === 0;
     }
     for (const n of [...soldiers.keys()]) if (!seen.has(n)) dropSoldier(n);
     shieldMat.opacity = f.still ? 0.22 : 0.16 + 0.08 * Math.sin(f.t / 90);
+    for (const m of Object.values(auraMats)) m.opacity = f.still ? 0.75 : 0.55 + 0.25 * Math.sin(f.t / 120);
+
+    // Power-ups.
+    if (!pickups.length) for (const p of f.pickups) pickups.push(makePickup(p.kind, p.x, p.y));
+    for (const [i, p] of f.pickups.entries()) {
+      const m = pickups[i];
+      if (!m) continue;
+      m.model.visible = p.ready;
+      m.halo.visible = p.ready;
+      m.ringMat.opacity = p.ready ? 0.85 : 0.2;
+      if (p.ready && !f.still) {
+        m.model.rotation.y = f.t / 600 + i;
+        m.model.position.y = 30 + Math.sin(f.t / 380 + i) * 5;
+      }
+    }
 
     // Bots.
     const seenBots = new Set<number>();
@@ -1259,12 +1403,65 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
         mesh.material = orbMat;
       } else {
         mesh.geometry = tracerGeo;
-        mesh.material = tracerMats[s.team] ?? tracerMats[0]!;
         mesh.rotation.y = -Math.atan2(s.vy, s.vx);
-        (mesh.material as THREE.MeshBasicMaterial).color.set(f.teamColors[s.team] ?? "#ffffff");
+        if (s.hot) mesh.material = hotMat;
+        else {
+          mesh.material = tracerMats[s.team] ?? tracerMats[0]!;
+          (mesh.material as THREE.MeshBasicMaterial).color.set(f.teamColors[s.team] ?? "#ffffff");
+        }
       }
+      mesh.scale.set(s.long && s.team >= 0 ? 4 : 1, s.hot ? 1.8 : 1, s.hot ? 1.8 : 1);
     }
     for (let i = f.shots.length; i < shotPool.length; i++) shotPool[i]!.visible = false;
+
+    // Grenades.
+    for (const [i, g] of f.grenades.entries()) {
+      let p = grenadePool[i];
+      if (!p) {
+        const mesh = new THREE.Mesh(grenadeGeo, grenadeMat);
+        const blink = new THREE.Sprite(glow);
+        blink.scale.setScalar(18);
+        blink.position.y = 10;
+        mesh.add(blink);
+        scene.add(mesh);
+        p = { mesh, blink };
+        grenadePool.push(p);
+      }
+      p.mesh.visible = true;
+      p.mesh.position.set(g.x, g.z, g.y);
+      p.mesh.rotation.z = f.still ? 0 : f.t / 90 + g.id;
+      p.blink.visible = f.still || Math.floor(f.t / 120) % 2 === 0;
+    }
+    for (let i = f.grenades.length; i < grenadePool.length; i++) grenadePool[i]!.mesh.visible = false;
+
+    // Blasts.
+    for (const [i, b] of f.booms.entries()) {
+      let p = boomPool[i];
+      if (!p) {
+        const mat = own(
+          new THREE.MeshBasicMaterial({
+            color: "#ffb15a",
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          }),
+        );
+        const ball = new THREE.Mesh(boomGeo, mat);
+        const flare = new THREE.Sprite(glow);
+        scene.add(ball, flare);
+        p = { ball, mat, flare };
+        boomPool.push(p);
+      }
+      const r = R.grenade.blastRadius * (0.35 + 0.65 * Math.sqrt(b.k));
+      p.ball.visible = p.flare.visible = true;
+      p.ball.position.set(b.x, r * 0.35, b.y);
+      p.ball.scale.set(r, r * 0.7, r);
+      p.mat.opacity = 0.75 * (1 - b.k);
+      p.flare.position.set(b.x, 40, b.y);
+      p.flare.scale.setScalar(r * 2.6 * (1 - b.k * 0.5));
+    }
+    for (let i = f.booms.length; i < boomPool.length; i++)
+      boomPool[i]!.ball.visible = boomPool[i]!.flare.visible = false;
 
     renderer.render(scene, camera);
   };

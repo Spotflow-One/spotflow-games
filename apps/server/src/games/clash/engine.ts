@@ -3,13 +3,21 @@ import {
   CLASH_CENTER,
   CLASH_DRONE_SPAWNS,
   CLASH_FLAG,
+  CLASH_PICKUPS,
+  CLASH_WEAPON_SHIFT,
+  CLASH_WEAPONS,
   CLASH_RULES as R,
   clashBases,
   clashInputSchema,
+  coverAlong,
+  lineClear,
   clashSessionConfigSchema,
   pointInWall,
   resolveCircle,
   type ClashFeedTuple,
+  type ClashBoomTuple,
+  type ClashGrabTuple,
+  type ClashGrenadeTuple,
   type ClashSnapshot,
   type ClashShotTuple,
   type ClashView,
@@ -51,6 +59,16 @@ interface Fighter {
   dodgeReadyAt?: number;
   /** Last dodge counter seen from the client. */
   lastD?: number;
+  /** Power-ups running until then. Missing on games saved before power-ups existed. */
+  overdriveUntil?: number;
+  hasteUntil?: number;
+  pickups?: number;
+  /** Index in CLASH_WEAPONS held now, and the one asked for (taken at base or on respawn). */
+  weapon?: number;
+  wantWeapon?: number;
+  /** Last grenade counter seen from the client, and when the next grenade is ready. */
+  lastG?: number;
+  grenadeReadyAt?: number;
   /** Crouching: a smaller target. */
   crouched?: boolean;
   eliminations: number;
@@ -104,6 +122,10 @@ interface ClashState {
   shots: Shot[];
   power: number[];
   nextDroneAt: number;
+  /** For each spot in CLASH_PICKUPS, when its power-up is back; 0 while it is there to take. */
+  itemsAt?: number[];
+  /** Grenades on their way or on the ground, waiting to go off. */
+  grenades?: Array<{ id: number; x: number; y: number; team: number; ownerId: string; boomAt: number }>;
   /** When the next Titan appears, or 0 while one is alive. */
   titanAt: number;
   outcome: ClashView["outcome"];
@@ -114,6 +136,9 @@ interface TickOut {
   shots: ClashShotTuple[];
   gone: number[];
   feed: ClashFeedTuple[];
+  grabs: ClashGrabTuple[];
+  grenades: ClashGrenadeTuple[];
+  booms: ClashBoomTuple[];
   hurt: Set<string | number>;
 }
 
@@ -146,6 +171,11 @@ export function createClashEngine() {
     f.lastMoveAt = ctx.now();
     f.lastHurtAt = 0;
     f.dodgeUntil = 0;
+    // A new life picks up the weapon asked for.
+    f.weapon = f.wantWeapon ?? f.weapon ?? 0;
+    // Power-ups are lost with the life they were taken in.
+    f.overdriveUntil = 0;
+    f.hasteUntil = 0;
   };
 
   const addFighter = (ctx: GameContext, state: ClashState, userId: string, team: number) => {
@@ -201,17 +231,73 @@ export function createClashEngine() {
     const x = f.x + Math.cos(f.a) * start;
     const y = f.y + Math.sin(f.a) * start;
     if (pointInWall(x, y)) return;
-    addShot(state, out, now, {
-      x,
-      y,
-      vx: Math.cos(f.a) * R.shotSpeed,
-      vy: Math.sin(f.a) * R.shotSpeed,
-      team: f.team,
-      ownerId: f.userId,
-      ownerN: f.n,
-      damage: R.shotDamage,
-      rangeMs: (R.shotRange / R.shotSpeed) * 1000,
-    });
+    const w = weaponOf(f);
+    const damage = now < (f.overdriveUntil ?? 0) ? w.damage * R.pickup.overdrive.damageMult : w.damage;
+    for (let i = 0; i < w.pellets; i++) {
+      // Pellets fan out evenly across the spread.
+      const a = f.a + (w.pellets > 1 ? (i / (w.pellets - 1) - 0.5) * w.spread : 0);
+      addShot(state, out, now, {
+        x,
+        y,
+        vx: Math.cos(a) * w.speed,
+        vy: Math.sin(a) * w.speed,
+        team: f.team,
+        ownerId: f.userId,
+        ownerN: f.n,
+        damage,
+        rangeMs: (w.range / w.speed) * 1000,
+      });
+    }
+  };
+
+  const weaponOf = (f: Fighter) => CLASH_WEAPONS[f.weapon ?? 0] ?? CLASH_WEAPONS[0]!;
+
+  /** Lobs a grenade the way the player aims. It stops short against cover or the arena's edge. */
+  const throwGrenade = (state: ClashState, f: Fighter, now: number, out: TickOut) => {
+    const G = R.grenade;
+    const tx = f.x + Math.cos(f.a) * G.throwRange;
+    const ty = f.y + Math.sin(f.a) * G.throwRange;
+    const reach = coverAlong(f.x, f.y, tx, ty, { pad: 6 });
+    const pad = 8;
+    const x = Math.max(pad, Math.min(R.arena.width - pad, f.x + (tx - f.x) * reach));
+    const y = Math.max(pad, Math.min(R.arena.height - pad, f.y + (ty - f.y) * reach));
+    const landAt = now + (Math.hypot(x - f.x, y - f.y) / G.speed) * 1000;
+    const boomAt = Math.max(landAt, now + G.fuseMs);
+    const id = state.nextId++;
+    (state.grenades ??= []).push({ id, x, y, team: f.team, ownerId: f.userId, boomAt });
+    out.grenades.push([id, round(f.x), round(f.y), round(x), round(y), now, round(landAt), round(boomAt), f.team]);
+  };
+
+  /** Grenades whose fuse has run out go off, hurting what the blast can reach. */
+  const explodeGrenades = (ctx: GameContext, state: ClashState, out: TickOut) => {
+    const now = ctx.now();
+    const G = R.grenade;
+    const left: NonNullable<ClashState["grenades"]> = [];
+    for (const g of state.grenades ?? []) {
+      if (now < g.boomAt) {
+        left.push(g);
+        continue;
+      }
+      out.booms.push([g.id, round(g.x), round(g.y), g.team]);
+      const owner = state.fighters.get(g.ownerId) ?? null;
+      const damageAt = (x: number, y: number, r: number) => {
+        const d = Math.max(0, Math.hypot(x - g.x, y - g.y) - r);
+        if (d > G.blastRadius || !lineClear(g.x, g.y, x, y)) return 0;
+        return Math.round(G.maxDamage - (G.maxDamage - G.minDamage) * (d / G.blastRadius));
+      };
+      for (const f of state.fighters.values()) {
+        if (!f.alive || f.team === g.team) continue;
+        const dmg = damageAt(f.x, f.y, R.playerRadius);
+        if (dmg) hurtFighter(ctx, state, f, dmg, owner, out);
+      }
+      if (owner)
+        for (const npc of state.npcs) {
+          const dmg = damageAt(npc.x, npc.y, npc.kind === 1 ? R.titan.radius : R.drone.radius);
+          if (dmg) hurtNpc(ctx, state, npc, dmg, owner, out);
+        }
+    }
+    state.grenades = left;
+    state.npcs = state.npcs.filter((n) => n.hp > 0);
   };
 
   const addShot = (
@@ -313,6 +399,19 @@ export function createClashEngine() {
       const input = parsed.data;
       f.a = input.a;
       f.crouched = !!input.c;
+      // A new weapon is yours at once at your own base, or else from your next life.
+      if (input.w !== undefined) f.wantWeapon = input.w;
+      if (f.wantWeapon !== undefined && f.wantWeapon !== f.weapon) {
+        const base = clashBases(state.config.teams)[f.team]!;
+        if (dist2(f.x, f.y, base.x, base.y) <= R.baseRadius ** 2) f.weapon = f.wantWeapon;
+      }
+      // A new grenade counter throws one, once the last has recharged.
+      const threw = input.g !== undefined && f.lastG !== undefined && input.g !== f.lastG;
+      f.lastG = input.g;
+      if (threw && now >= (f.grenadeReadyAt ?? 0) - 200 && !isRolling(now, f)) {
+        f.grenadeReadyAt = now + R.grenade.cooldownMs;
+        throwGrenade(state, f, now, out);
+      }
       // A new dodge counter starts a roll, once the last one has recharged.
       const dodged = input.d !== undefined && f.lastD !== undefined && input.d !== f.lastD;
       f.lastD = input.d;
@@ -325,7 +424,10 @@ export function createClashEngine() {
       // roll is much faster, and its moves can arrive a little after it ends.
       if (input.l === f.life) {
         const rolling = now < (f.dodgeUntil ?? 0) + 2 * R.tickMs;
-        const speed = rolling ? (R.dodge.distance / R.dodge.ms) * 1000 : R.playerSpeed;
+        const hasted = now < (f.hasteUntil ?? 0) + 2 * R.tickMs;
+        const speed = rolling
+          ? (R.dodge.distance / R.dodge.ms) * 1000
+          : R.playerSpeed * (hasted ? R.pickup.haste.speedMult : 1);
         const allowed = speed * ((now - f.lastMoveAt) / 1000) * 1.6 + 6;
         let dx = input.x - f.x;
         let dy = input.y - f.y;
@@ -342,7 +444,7 @@ export function createClashEngine() {
       const tapped = f.lastS >= 0 && input.s !== f.lastS;
       f.lastS = input.s;
       f.firing = input.f && !isRolling(now, f);
-      if ((f.firing || (tapped && !isRolling(now, f))) && now - f.lastShotAt >= R.fireCooldownMs)
+      if ((f.firing || (tapped && !isRolling(now, f))) && now - f.lastShotAt >= weaponOf(f).cooldownMs)
         fire(ctx, state, f, out);
     }
   };
@@ -351,9 +453,11 @@ export function createClashEngine() {
     const now = ctx.now();
     const kept: Shot[] = [];
     shots: for (const s of state.shots) {
-      for (let i = 0; i < SUBSTEPS; i++) {
-        s.x += (s.vx * dt) / SUBSTEPS;
-        s.y += (s.vy * dt) / SUBSTEPS;
+      // Fast shots take more, smaller steps, so they can't skip over anyone.
+      const steps = Math.max(SUBSTEPS, Math.ceil((Math.hypot(s.vx, s.vy) * dt) / 40));
+      for (let i = 0; i < steps; i++) {
+        s.x += (s.vx * dt) / steps;
+        s.y += (s.vy * dt) / steps;
         if (pointInWall(s.x, s.y) || s.x < 0 || s.y < 0 || s.x > R.arena.width || s.y > R.arena.height) {
           out.gone.push(s.id);
           continue shots;
@@ -522,6 +626,35 @@ export function createClashEngine() {
     return npc;
   };
 
+  /** Power-ups go to whoever reaches them first, and come back after a while. */
+  const grabPickups = (ctx: GameContext, state: ClashState, out: TickOut) => {
+    const now = ctx.now();
+    const at = (state.itemsAt ??= CLASH_PICKUPS.map(() => 0));
+    CLASH_PICKUPS.forEach((spot, i) => {
+      if (at[i]! > now) return;
+      at[i] = 0;
+      let taker: Fighter | null = null;
+      let best = (R.playerRadius + R.pickup.radius) ** 2;
+      for (const f of state.fighters.values()) {
+        if (!f.alive) continue;
+        // Nobody wastes a medkit at full health.
+        if (spot.kind === "medkit" && f.hp >= R.playerHp) continue;
+        const d = dist2(f.x, f.y, spot.x, spot.y);
+        if (d <= best) {
+          taker = f;
+          best = d;
+        }
+      }
+      if (!taker) return;
+      if (spot.kind === "medkit") taker.hp = Math.min(R.playerHp, taker.hp + R.pickup.medkitHeal);
+      else if (spot.kind === "overdrive") taker.overdriveUntil = now + R.pickup.overdrive.ms;
+      else taker.hasteUntil = now + R.pickup.haste.ms;
+      taker.pickups = (taker.pickups ?? 0) + 1;
+      at[i] = now + R.pickup.respawnMs[spot.kind];
+      out.grabs.push([taker.n, i]);
+    });
+  };
+
   const heal = (ctx: GameContext, state: ClashState, dt: number) => {
     const now = ctx.now();
     const bases = clashBases(state.config.teams);
@@ -551,6 +684,9 @@ export function createClashEngine() {
           (out.hurt.has(f.userId) ? CLASH_FLAG.hurt : 0) |
           (f.firing ? CLASH_FLAG.firing : 0) |
           (f.alive && now < (f.dodgeUntil ?? 0) ? CLASH_FLAG.dodge : 0) |
+          (f.alive && now < (f.overdriveUntil ?? 0) ? CLASH_FLAG.overdrive : 0) |
+          (f.alive && now < (f.hasteUntil ?? 0) ? CLASH_FLAG.haste : 0) |
+          ((f.weapon ?? 0) << CLASH_WEAPON_SHIFT) |
           (f.alive && f.crouched ? CLASH_FLAG.crouch : 0),
         f.life,
         f.points,
@@ -568,6 +704,10 @@ export function createClashEngine() {
       shots: out.shots,
       gone: out.gone,
       feed: out.feed,
+      items: (state.itemsAt ?? []).map((t) => (t > now ? Math.ceil((t - now) / 100) : 0)),
+      grabs: out.grabs,
+      grenades: out.grenades,
+      booms: out.booms,
     };
   };
 
@@ -576,13 +716,15 @@ export function createClashEngine() {
     // A late timer must not teleport everything, so cap the step.
     const dt = Math.min(0.25, Math.max(0, (now - state.lastTick) / 1000));
     state.lastTick = now;
-    const out: TickOut = { shots: [], gone: [], feed: [], hurt: new Set() };
+    const out: TickOut = { shots: [], gone: [], feed: [], grabs: [], grenades: [], booms: [], hurt: new Set() };
 
     syncRoster(ctx, state);
     for (const f of state.fighters.values()) if (!f.alive && now >= f.respawnAt) respawn(ctx, state, f);
     applyInputs(ctx, state, out);
     moveShots(ctx, state, dt, out);
     runNpcs(ctx, state, dt, out);
+    explodeGrenades(ctx, state, out);
+    grabPickups(ctx, state, out);
     heal(ctx, state, dt);
     spawnNpcs(ctx, state);
 
@@ -626,6 +768,7 @@ export function createClashEngine() {
         power: new Array<number>(teams).fill(0),
         nextDroneAt: now + 2000,
         titanAt: config.bots ? now + R.titan.firstSpawnMs : 0,
+        itemsAt: CLASH_PICKUPS.map(() => 0),
         outcome: null,
       };
       // Shuffle, then deal players round the teams so sizes differ by one at most.
@@ -672,6 +815,7 @@ export function createClashEngine() {
         ctx.addTiebreakTime(f.userId, f.deaths * 1000);
       }
       state.shots = [];
+      state.grenades = [];
       ctx.broadcastState();
     },
 
@@ -693,6 +837,7 @@ export function createClashEngine() {
           deaths: f.deaths,
           drones: f.drones,
           titanDamage: Math.round(f.titanDamage),
+          pickups: f.pickups ?? 0,
           points: f.points,
         })),
         me: me ? { n: me.n, team: me.team } : null,
