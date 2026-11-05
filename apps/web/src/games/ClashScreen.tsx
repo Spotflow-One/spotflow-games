@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Crosshair,
+  ChevronsDown,
   Focus,
   Footprints,
   ListOrdered,
@@ -86,6 +87,8 @@ const AIM_TURN = 0.6;
 const AIM_ZOOM_RATE = 8;
 /** A quick turn spins you round to face behind you over this long. */
 const QUICK_TURN_MS = 180;
+/** Crouching down or standing up takes about a fifth of a second. */
+const CROUCH_RATE = 5;
 /**
  * Aim help: a shot goes straight at an enemy this close to the crosshair, in radians. Space and
  * the phone's fire button help more, since they can't aim as finely as a mouse.
@@ -164,6 +167,7 @@ export function ClashScreen({ session, game, meId }: Props) {
   const [locked, setLocked] = useState(false);
   const [board, setBoard] = useState(false);
   const [aiming, setAiming] = useState(false);
+  const [crouching, setCrouching] = useState(false);
   const [sens, setSens] = useState(readSens);
   const [hud, setHud] = useState<Hud>({
     power: game.power,
@@ -214,6 +218,10 @@ export function ClashScreen({ session, game, meId }: Props) {
     /** Right mouse held, or the phone's aim button toggled on. */
     aimHeld: false,
     aimToggle: false,
+    /** Crouching, toggled with C or the phone's crouch button. */
+    crouch: false,
+    /** How far down, 0 to 1, eased so the camera sinks smoothly. */
+    low: 0,
     /** How far into the sights, 0 to 1. */
     zoom: 0,
     /** What's left of a quick turn, in radians. */
@@ -362,7 +370,9 @@ export function ClashScreen({ session, game, meId }: Props) {
   useEffect(() => {
     const c = controls.current;
     const gameKey = (k: string) =>
-      ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "shift", "q", "tab"].includes(k);
+      ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "shift", "q", "tab", "c"].includes(
+        k,
+      );
     const typing = (e: KeyboardEvent) =>
       e.target instanceof HTMLElement &&
       (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
@@ -375,6 +385,11 @@ export function ClashScreen({ session, game, meId }: Props) {
         c.spaceDown = true;
       } else if (k === "shift") {
         if (!e.repeat) c.dodgeAsked = true;
+      } else if (k === "c") {
+        if (!e.repeat) {
+          c.crouch = !c.crouch;
+          setCrouching(c.crouch);
+        }
       } else if (k === "q") {
         if (!e.repeat && !c.turnLeft) c.turnLeft = Math.PI;
       } else if (k === "tab") setBoard(true);
@@ -554,6 +569,8 @@ export function ClashScreen({ session, game, meId }: Props) {
       const wantZoom = alive && !c.dash && (c.aimHeld || c.aimToggle) ? 1 : 0;
       c.zoom += Math.sign(wantZoom - c.zoom) * Math.min(Math.abs(wantZoom - c.zoom), AIM_ZOOM_RATE * dt);
       if (!alive) c.aimToggle = false;
+      const wantLow = alive && c.crouch ? 1 : 0;
+      c.low += Math.sign(wantLow - c.low) * Math.min(Math.abs(wantLow - c.low), CROUCH_RATE * dt);
       let fwd = 0;
       let side = 0;
       if (c.move) {
@@ -603,7 +620,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         m.x = p.x;
         m.y = p.y;
       } else if (alive && (fwd || side)) {
-        const step = R.playerSpeed * (1 - (1 - AIM_WALK) * c.zoom) * dt;
+        const step = R.playerSpeed * (1 - (1 - AIM_WALK) * c.zoom) * (1 - (1 - R.crouch.speed) * c.low) * dt;
         const p = resolveCircle(
           m.x + (fx * fwd - fy * side) * step,
           m.y + (fy * fwd + fx * side) * step,
@@ -631,7 +648,8 @@ export function ClashScreen({ session, game, meId }: Props) {
           if (alive && d < SPOT_RANGE && lineClear(m.x, m.y, p.x, p.y)) inSight.add(p.n);
           if (
             inSight.has(p.n) ||
-            (alive && d < HEAR_RANGE) ||
+            // A crouching enemy moves quietly enough not to be heard.
+            (alive && d < HEAR_RANGE && !(p.flags & CLASH_FLAG.crouch)) ||
             p.flags & CLASH_FLAG.firing ||
             mates.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < SPOT_RANGE && lineClear(q.x, q.y, p.x, p.y))
           )
@@ -715,6 +733,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         .map((p) => ({ n: p.n, x: p.x, y: p.y, a: p.a, team: teams.current.get(p.n) ?? 0, flags: p.flags }));
       if (alive) {
         let flags = m.flags & CLASH_FLAG.shield;
+        if (c.crouch) flags |= CLASH_FLAG.crouch;
         if (firing) flags |= CLASH_FLAG.firing;
         if (c.dash) flags |= CLASH_FLAG.dodge;
         if (performance.now() - m.hurtAt < 120) flags |= CLASH_FLAG.hurt;
@@ -730,6 +749,7 @@ export function ClashScreen({ session, game, meId }: Props) {
               yaw: c.yaw,
               down: m.alive ? 0 : Math.min(1, (performance.now() - m.downAt) / 900),
               zoom: c.zoom,
+              low: c.low,
             }
           : null,
         players,
@@ -859,7 +879,9 @@ export function ClashScreen({ session, game, meId }: Props) {
   useEffect(() => {
     if (hud.alive) return;
     controls.current.aimToggle = false;
+    controls.current.crouch = false;
     setAiming(false);
+    setCrouching(false);
   }, [hud.alive]);
 
   const changeSens = (v: number) => {
@@ -875,6 +897,12 @@ export function ClashScreen({ session, game, meId }: Props) {
     const c = controls.current;
     c.aimToggle = !c.aimToggle;
     setAiming(c.aimToggle);
+  };
+  const crouchNow = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const c = controls.current;
+    c.crouch = !c.crouch;
+    setCrouching(c.crouch);
   };
   const turnNow = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -1042,6 +1070,12 @@ export function ClashScreen({ session, game, meId }: Props) {
                 <kbd>Shift</kbd>
               </span>
             )}
+            {crouching && (
+              <span className="clash-low">
+                <ChevronsDown aria-hidden="true" size={14} />
+                Crouched
+              </span>
+            )}
             <span className="sg-num clash-pts">{hud.points} pts</span>
           </div>
         )}
@@ -1078,6 +1112,17 @@ export function ClashScreen({ session, game, meId }: Props) {
             onPointerDown={aimNow}
           >
             <Focus aria-hidden="true" size={22} />
+          </button>
+        )}
+        {touch && game.isPlayer && (
+          <button
+            type="button"
+            className={`clash-crouch${crouching ? " on" : ""}`}
+            aria-label="Crouch"
+            aria-pressed={crouching}
+            onPointerDown={crouchNow}
+          >
+            <ChevronsDown aria-hidden="true" size={22} />
           </button>
         )}
         {touch && game.isPlayer && (
@@ -1174,8 +1219,9 @@ export function ClashScreen({ session, game, meId }: Props) {
           <Crosshair aria-hidden="true" size={16} />
           Move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>. Turn with the mouse or <kbd>←</kbd>{" "}
           <kbd>→</kbd>. Click or hold to fire; <kbd>Space</kbd> fires with aim help; hold the right mouse button to aim
-          down the sights. <kbd>Shift</kbd> rolls out of the way of shots, <kbd>Q</kbd> turns you around, and holding{" "}
-          <kbd>Tab</kbd> shows the scoreboard. Teammates spot enemies on your minimap, and your base heals you.
+          down the sights. <kbd>Shift</kbd> rolls out of the way of shots, <kbd>C</kbd> crouches (slower, but harder to
+          hit and to hear), <kbd>Q</kbd> turns you around, and holding <kbd>Tab</kbd> shows the scoreboard. Teammates
+          spot enemies on your minimap, and your base heals you.
         </p>
       )}
       {!touch && game.isPlayer && <div className="clash-settings sg-muted">{lookSpeed}</div>}

@@ -51,6 +51,8 @@ interface Fighter {
   dodgeReadyAt?: number;
   /** Last dodge counter seen from the client. */
   lastD?: number;
+  /** Crouching: a smaller target. */
+  crouched?: boolean;
   eliminations: number;
   deaths: number;
   drones: number;
@@ -250,6 +252,7 @@ export function createClashEngine() {
     f.hp = 0;
     f.alive = false;
     f.firing = false;
+    f.crouched = false;
     f.deaths++;
     f.respawnAt = ctx.now() + R.respawnMs;
     if (by) {
@@ -303,11 +306,13 @@ export function createClashEngine() {
       const parsed = fresh ? clashInputSchema.safeParse(raw.value) : null;
       if (!f.alive || !parsed?.success) {
         f.firing = false;
+        f.crouched = false;
         f.lastMoveAt = now;
         continue;
       }
       const input = parsed.data;
       f.a = input.a;
+      f.crouched = !!input.c;
       // A new dodge counter starts a roll, once the last one has recharged.
       const dodged = input.d !== undefined && f.lastD !== undefined && input.d !== f.lastD;
       f.lastD = input.d;
@@ -357,7 +362,8 @@ export function createClashEngine() {
         for (const f of state.fighters.values()) {
           // A rolling player is dodging: the shot flies on past.
           if (!f.alive || f.team === s.team || isRolling(now, f)) continue;
-          if (dist2(s.x, s.y, f.x, f.y) > (R.playerRadius + R.shotRadius) ** 2) continue;
+          const r = f.crouched ? R.crouch.hitRadius : R.playerRadius;
+          if (dist2(s.x, s.y, f.x, f.y) > (r + R.shotRadius) ** 2) continue;
           // A spawn shield soaks up the shot.
           hurtFighter(ctx, state, f, s.damage, owner ?? null, out);
           out.gone.push(s.id);
@@ -544,7 +550,8 @@ export function createClashEngine() {
           (f.alive && now < f.shieldUntil ? CLASH_FLAG.shield : 0) |
           (out.hurt.has(f.userId) ? CLASH_FLAG.hurt : 0) |
           (f.firing ? CLASH_FLAG.firing : 0) |
-          (f.alive && now < (f.dodgeUntil ?? 0) ? CLASH_FLAG.dodge : 0),
+          (f.alive && now < (f.dodgeUntil ?? 0) ? CLASH_FLAG.dodge : 0) |
+          (f.alive && f.crouched ? CLASH_FLAG.crouch : 0),
         f.life,
         f.points,
         f.alive ? 0 : Math.max(0, Math.ceil((f.respawnAt - now) / 100)),

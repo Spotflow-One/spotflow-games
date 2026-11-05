@@ -1804,6 +1804,7 @@ a.sg-btn {
 
 /* Core Clash: aim, quick turn, scoreboard and look speed. */
 .clash-aim,
+.clash-crouch,
 .clash-turn {
   position: absolute;
   display: grid;
@@ -1823,6 +1824,23 @@ a.sg-btn {
 .clash-aim.on {
   border-color: #ffd36b;
   background: rgba(255, 211, 107, 0.4);
+}
+.clash-crouch {
+  right: 202px;
+  bottom: 74px;
+  width: 54px;
+  height: 54px;
+}
+.clash-crouch.on {
+  border-color: #ffd36b;
+  background: rgba(255, 211, 107, 0.4);
+}
+.clash-low {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #ffd36b;
+  font-size: 12px;
 }
 .clash-turn {
   right: 128px;
