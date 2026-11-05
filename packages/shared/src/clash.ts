@@ -25,6 +25,11 @@ export const CLASH_RULES = {
    * can't shoot while rolling, and it takes a moment to be ready again.
    */
   dodge: { distance: 190, ms: 280, cooldownMs: 2200 },
+  /**
+   * Crouching: you walk slower, but you're a smaller target, and enemies close by can't hear you
+   * on their minimap.
+   */
+  crouch: { speed: 0.45, hitRadius: 11 },
   shotSpeed: 1100,
   shotRange: 900,
   shotRadius: 5,
@@ -314,12 +319,23 @@ export const clashInputSchema = z
     l: z.number().int().min(0).max(1_000_000),
     /** Dodge counter: a change starts a roll, if one is ready. */
     d: z.number().int().min(0).max(1_000_000_000).optional(),
+    /** Crouching. */
+    c: z.boolean().optional(),
   })
   .strict();
 export type ClashInput = z.infer<typeof clashInputSchema>;
 
 /** Bits in a player's snapshot flags. */
-export const CLASH_FLAG = { alive: 1, shield: 2, hurt: 4, firing: 8, dodge: 16, overdrive: 32, haste: 64 } as const;
+export const CLASH_FLAG = {
+  alive: 1,
+  shield: 2,
+  hurt: 4,
+  firing: 8,
+  dodge: 16,
+  crouch: 32,
+  overdrive: 64,
+  haste: 128,
+} as const;
 
 /**
  * One player in a snapshot: number, x, y, aim (centiradians), health, flags, life, personal
