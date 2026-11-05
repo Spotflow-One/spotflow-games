@@ -5,6 +5,7 @@
  * it. A ground point (x, y) sits at (x, height, y) here, so the world's y axis points up.
  */
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
   CLASH_CENTER,
@@ -66,9 +67,20 @@ const CAM_BLOCK_HEIGHT = 70;
 // ---------------------------------------------------------------------------------------------
 // Geometry helpers
 
+/**
+ * How a surface looks: a colour plus how rough, how metallic and how brightly it glows. Only the
+ * soldier materials read the last three; see `vertexFinish`.
+ */
+interface Finish {
+  c: string;
+  r: number;
+  m: number;
+  g?: number;
+}
+
 type Part = [
   geo: THREE.BufferGeometry,
-  color: string,
+  color: string | Finish,
   pos: [number, number, number],
   rot?: [number, number, number],
   scale?: [number, number, number],
@@ -76,6 +88,8 @@ type Part = [
 
 /** Many coloured primitives baked into one geometry, so a model is one draw call. */
 function bake(parts: Part[], keepUv = false) {
+  // With any finish in the mix, every part carries one (merging needs matching attributes).
+  const finished = parts.some(([, color]) => typeof color !== "string");
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
@@ -90,11 +104,17 @@ function bake(parts: Part[], keepUv = false) {
         ),
       );
     if (!keepUv) g.deleteAttribute("uv");
-    const c = new THREE.Color(color);
+    const fin = typeof color === "string" ? { c: color, r: 0.8, m: 0.05 } : color;
+    const c = new THREE.Color(fin.c);
     const n = g.attributes.position!.count;
     const col = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+    const surf = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      col.set([c.r, c.g, c.b], i * 3);
+      surf.set([fin.r, fin.m, fin.g ?? 0], i * 3);
+    }
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    if (finished) g.setAttribute("surf", new THREE.BufferAttribute(surf, 3));
     return g;
   });
   // Some primitives (like the octahedron) come without an index; merging needs all or none.
@@ -325,100 +345,209 @@ function flagTexture(team: number, color: string) {
 // ---------------------------------------------------------------------------------------------
 // Models
 
-const SKIN = ["#8d5a3b", "#c68a5a", "#5e3a24", "#e0b48c", "#a86e45", "#6b4129"];
-const PANTS = "#3b3f33";
-const GEAR = "#4b5137";
-const DARK = "#1d1e22";
+// Soldier finishes. Everything team-coloured is in the kit, painted white here and tinted by
+// the team's material; the rest is dark, worn gear so the team colour is what you read first.
+const SUITS = ["#2f343c", "#363a30", "#3a3430"];
+const ARMOUR: Finish = { c: "#474d57", r: 0.38, m: 0.6 };
+const METAL: Finish = { c: "#a9afb8", r: 0.28, m: 0.95 };
+const GUN: Finish = { c: "#2a2d33", r: 0.42, m: 0.55 };
+const RUBBER: Finish = { c: "#17181b", r: 0.9, m: 0 };
+const LEATHER: Finish = { c: "#3d3329", r: 0.7, m: 0.05 };
+const WEBBING: Finish = { c: "#5b5a48", r: 0.92, m: 0 };
+const PAINT: Finish = { c: "#ffffff", r: 0.34, m: 0.3 };
+const PAINT_SHADE: Finish = { c: "#8c8c8c", r: 0.45, m: 0.35 };
+/** Dark, glossy visor glass, and the light that glows through it in the team colour. */
+const GLASS: Finish = { c: "#2a2d33", r: 0.08, m: 0.4 };
+const VISOR: Finish = { c: "#2a2e34", r: 0.12, m: 0.2, g: 1 };
 
 /** A rounded limb from one joint to another. */
 function limb(a: [number, number, number], b: [number, number, number], r: number) {
   const from = new THREE.Vector3(...a);
   const dir = new THREE.Vector3(...b).sub(from);
-  const g = new THREE.CapsuleGeometry(r, dir.length(), 3, 8);
+  const g = new THREE.CapsuleGeometry(r, dir.length(), 3, 10);
   g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize()));
   g.translate(from.x + dir.x / 2, from.y + dir.y / 2, from.z + dir.z / 2);
   return g;
 }
 
+const lerp3 = (a: number[], b: number[], k: number): [number, number, number] => [
+  a[0]! + (b[0]! - a[0]!) * k,
+  a[1]! + (b[1]! - a[1]!) * k,
+  a[2]! + (b[2]! - a[2]!) * k,
+];
+
 /** Where the hips are. Legs hang from here, and a roll spins the soldier about this height. */
 const HIP = 29;
 const THIGH = 13;
 const SHIN = 11;
+/** The upper body leans into the rifle a little, about the hips: a ready stance. */
+const LEAN = new THREE.Matrix4()
+  .makeTranslation(0, HIP, 0)
+  .multiply(new THREE.Matrix4().makeRotationZ(-0.07))
+  .multiply(new THREE.Matrix4().makeTranslation(0, -HIP, 0));
+/** The rifle's muzzle, where the flash goes. */
+const MUZZLE = new THREE.Vector3(41.5, 44.3, 4).applyMatrix4(LEAN);
 
 /**
- * A soldier facing +x, about 64 units tall, holding a rifle at the ready on their right (+z).
- * Team-coloured clothes are a separate mesh, and the legs are jointed so they can walk and tuck.
+ * An armoured special-forces soldier facing +x, about 66 units tall, holding a rifle at the
+ * ready on their right (+z). The team-coloured armour and glowing visor are a separate mesh (the
+ * kit), and the legs are jointed so they can walk and tuck.
  */
 function soldierModel(n: number, team: number) {
-  const skin = SKIN[n % SKIN.length]!;
+  const suit: Finish = { c: SUITS[n % SUITS.length]!, r: 0.88, m: 0 };
+  const square = CLASH_TEAMS[team]?.shape === "square";
   const shoulderR: [number, number, number] = [0, 49, 9.5];
   const shoulderL: [number, number, number] = [0, 49, -9.5];
   const elbowR: [number, number, number] = [3, 40, 12];
   const elbowL: [number, number, number] = [11, 41, -6];
   const gripR: [number, number, number] = [10, 40.5, 4.5];
   const gripL: [number, number, number] = [21, 43, 4];
-  const body = bake([
-    // Head, face and neck.
-    [new THREE.CylinderGeometry(2.8, 3.2, 5, 8), skin, [0.5, 53.5, 0]],
-    [sphere(6, 14, 12), skin, [0.8, 59, 0], undefined, [1, 1.12, 0.92]],
-    [box(2, 2.6, 1.8), skin, [6.6, 58.4, 0], [0, 0, -0.2]],
-    [sphere(0.9, 6, 4), DARK, [5.7, 60, 2.2]],
-    [sphere(0.9, 6, 4), DARK, [5.7, 60, -2.2]],
-    [box(0.8, 0.7, 3), "#5a2e22", [6.2, 55.6, 0]],
-    [sphere(1.6, 6, 6), skin, [0.4, 58.5, 5.7], undefined, [0.6, 1, 0.5]],
-    [sphere(1.6, 6, 6), skin, [0.4, 58.5, -5.7], undefined, [0.6, 1, 0.5]],
-    // Hips, belt, chest rig and backpack.
-    [box(9, 8, 15), PANTS, [0, HIP + 2, 0]],
-    [box(10, 2.5, 16), DARK, [0, HIP + 6, 0]],
-    [box(3, 12, 13), GEAR, [6.4, 43, 0]],
-    [box(2.4, 4, 3.5), GEAR, [8.3, 39, 3.6]],
-    [box(2.4, 4, 3.5), GEAR, [8.3, 39, -3.6]],
-    [box(7, 15, 13), GEAR, [-8.6, 43, 0]],
-    [box(4, 4, 11), "#3e4330", [-8.6, 52, 0]],
-    // Gloved hands.
-    [sphere(2.5, 8, 6), DARK, gripR],
-    [sphere(2.5, 8, 6), DARK, gripL],
-    // The rifle.
-    [box(17, 4.5, 3.4), "#2a2b30", [14, 43.5, 4]],
-    [box(9, 4.5, 3), "#2a2b30", [1.5, 42.5, 4]],
-    [new THREE.CylinderGeometry(1.1, 1.1, 14, 6), DARK, [29, 44.3, 4], [0, 0, Math.PI / 2]],
-    [box(3.5, 8, 3), DARK, [15, 38, 4], [0, 0, 0.25]],
-    [box(4, 1.8, 2), DARK, [12, 46.6, 4]],
-    [box(3, 4, 2.6), DARK, [8.5, 39.5, 4], [0, 0, -0.3]],
-  ]);
-  const helmet =
-    CLASH_TEAMS[team]?.shape === "square"
-      ? [
-          // A patrol cap with a peak.
-          box(12.5, 5, 12.5).translate(0.4, 63.2, 0),
-          box(5.5, 1.2, 10).translate(8.5, 61.4, 0),
-        ]
-      : [
-          // A round combat helmet.
-          new THREE.SphereGeometry(7.2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)
-            .scale(1.06, 0.95, 1)
-            .translate(0.6, 60.5, 0),
-          new THREE.CylinderGeometry(7.6, 7.8, 1.4, 16).translate(0.6, 60.6, 0),
-        ];
-  const parts = [
-    // Jacket: a chest broader at the shoulders, with sleeves down to the gloves.
-    new THREE.CylinderGeometry(10, 7.6, 19, 12).scale(0.66, 1, 1).translate(0, 43, 0),
-    sphere(4.3).translate(...shoulderR),
-    sphere(4.3).translate(...shoulderL),
-    limb(shoulderR, elbowR, 3.2),
-    limb(elbowR, gripR, 2.8),
-    limb(shoulderL, elbowL, 3.2),
-    limb(elbowL, gripL, 2.8),
-    ...helmet,
+  const across: [number, number, number] = [0, 0, Math.PI / 2];
+  const parts: Part[] = [
+    // Head under a balaclava, neck and armoured collar, and a respirator over the mouth.
+    [sphere(5.6, 14, 12), suit, [0.8, 59, 0], undefined, [1, 1.1, 0.92]],
+    [new THREE.CylinderGeometry(2.8, 3.2, 5, 10), suit, [0.5, 53.5, 0]],
+    [new THREE.CylinderGeometry(5.2, 6.6, 3, 14), ARMOUR, [0, 52, 0]],
+    [sphere(3.4, 12, 8), ARMOUR, [5.4, 55.4, 0], undefined, [0.8, 0.85, 1.15]],
+    [new THREE.CylinderGeometry(1.1, 1.1, 1.8, 8), METAL, [6.1, 54.8, 2.2], [0, 0.45, Math.PI / 2]],
+    [new THREE.CylinderGeometry(1.1, 1.1, 1.8, 8), METAL, [6.1, 54.8, -2.2], [0, -0.45, Math.PI / 2]],
+    // Ear defenders and a mount for night vision on the front of the helmet.
+    [new THREE.CylinderGeometry(2.5, 2.5, 1.8, 14), ARMOUR, [0.6, 58.4, 7.5], [Math.PI / 2, 0, 0]],
+    [new THREE.CylinderGeometry(2.5, 2.5, 1.8, 14), ARMOUR, [0.6, 58.4, -7.5], [Math.PI / 2, 0, 0]],
+    [box(1.6, 2.4, 3), METAL, [7.6, 63.6, 0], [0, 0, -0.35]],
+    // Torso in the combat suit, with plates over the stomach and pouches either side.
+    [new THREE.CylinderGeometry(9.4, 7.4, 19, 14), suit, [0, 43, 0], undefined, [0.66, 1, 1]],
+    [box(2.4, 2.8, 6.2), ARMOUR, [5.9, 38.4, 0], [0, 0, -0.08]],
+    [box(2.4, 2.8, 5.6), ARMOUR, [5.5, 35.5, 0], [0, 0, -0.04]],
+    [box(2.6, 4.4, 3.2), WEBBING, [6.8, 38.4, 4.9]],
+    [box(2.6, 4.4, 3.2), WEBBING, [6.8, 38.4, -4.9]],
+    // Power pack on the back.
+    [box(4.6, 11.5, 9.6), ARMOUR, [-9.2, 44.5, 0]],
+    [box(3.4, 2.4, 10.4), GUN, [-9.4, 50.6, 0]],
+    // Shoulders and arms, with elbow pads and gloves.
+    [sphere(4.1, 10, 8), suit, shoulderR],
+    [sphere(4.1, 10, 8), suit, shoulderL],
+    [limb(shoulderR, elbowR, 3.1), suit, [0, 0, 0]],
+    [limb(elbowR, gripR, 2.7), suit, [0, 0, 0]],
+    [limb(shoulderL, elbowL, 3.1), suit, [0, 0, 0]],
+    [limb(elbowL, gripL, 2.7), suit, [0, 0, 0]],
+    [sphere(3, 10, 8), ARMOUR, elbowR, undefined, [1, 1, 0.9]],
+    [sphere(3, 10, 8), ARMOUR, elbowL, undefined, [1, 1, 0.9]],
+    [sphere(2.6, 10, 8), RUBBER, gripR, undefined, [1.2, 0.95, 1.05]],
+    [sphere(2.6, 10, 8), RUBBER, gripL, undefined, [1.2, 0.95, 1.05]],
+    [box(1.6, 1.4, 2.8), ARMOUR, [gripR[0] + 0.4, gripR[1] + 2, gripR[2]]],
+    [box(1.6, 1.4, 2.8), ARMOUR, [gripL[0] + 0.4, gripL[1] + 2, gripL[2]]],
+    // Hips and the utility belt: buckle, pouches and a front plate.
+    [box(9, 8, 15), suit, [0, HIP + 2, 0]],
+    [box(10.6, 2.8, 16.4), LEATHER, [0, HIP + 6, 0]],
+    [box(1.2, 2.4, 3.4), METAL, [5.5, HIP + 6, 0]],
+    [box(3.4, 4, 3.4), WEBBING, [2.6, HIP + 4.4, 8.6]],
+    [box(3.4, 4, 3.4), WEBBING, [2.6, HIP + 4.4, -8.6]],
+    [box(3.4, 4, 3.4), WEBBING, [-3, HIP + 4.4, 8.4]],
+    [box(3.4, 4, 3.4), WEBBING, [-3, HIP + 4.4, -8.4]],
+    [box(4.6, 3.6, 3), WEBBING, [-5.6, HIP + 4.6, 0]],
+    [box(1.4, 5, 6), ARMOUR, [4.9, HIP + 1.5, 0], [0, 0, 0.08]],
+    // The rifle: stock, receiver, magazine, grip, rail, optic and a long barrel with a brake.
+    [box(1.6, 5.8, 3), RUBBER, [-3.3, 42.3, 4]],
+    [box(8, 3.4, 2.6), GUN, [1, 42.6, 4], [0, 0, 0.04]],
+    [box(16, 4.8, 3.4), GUN, [14, 43.5, 4]],
+    [box(14, 1.4, 2.2), ARMOUR, [15, 46.5, 4]],
+    [box(3.4, 7.5, 2.8), GUN, [16.6, 38.2, 4], [0, 0, 0.22]],
+    [box(2.8, 5.4, 2.4), RUBBER, [9, 39.4, 4], [0, 0, -0.3]],
+    [box(3, 2.2, 1.6), METAL, [14.5, 47.6, 4]],
+    [new THREE.CylinderGeometry(1.6, 1.6, 7.5, 12), GUN, [14, 49.4, 4], across],
+    [new THREE.CylinderGeometry(2, 1.6, 1.4, 12), GUN, [18.2, 49.4, 4], across],
+    [new THREE.CylinderGeometry(1, 1, 9, 10), METAL, [34, 44.3, 4], across],
+    [new THREE.CylinderGeometry(1.6, 1.6, 3.4, 8), GUN, [39.6, 44.3, 4], across],
+    [box(2.6, 2.6, 2.6), GUN, [28.4, 41.8, 4]],
   ];
-  const kit = mergeGeometries(parts)!;
-  for (const p of parts) p.dispose();
-  const thigh = bake([[limb([0, 0, 0], [0, -THIGH, 0], 4.2), PANTS, [0, 0, 0]]]);
-  const shin = bake([
-    [limb([0, 0, 0], [0, -SHIN + 1, 0], 3.6), PANTS, [0, 0, 0]],
-    [box(10, 4.5, 6.5), DARK, [1.8, -SHIN - 1.5, 0]],
+  // A little something per soldier: an antenna, a light on the shoulder, or a second pouch.
+  if (n % 3 === 0) parts.push([new THREE.CylinderGeometry(0.3, 0.4, 12, 5), METAL, [-10, 58, -3.4], [0.15, 0, 0.1]]);
+  else if (n % 3 === 1) parts.push([new THREE.CylinderGeometry(1.2, 1, 2.6, 10), METAL, [3, 52.4, -8.6], across]);
+  else parts.push([box(3.2, 4.2, 2.4), WEBBING, [6.6, 44.4, -5.2]]);
+
+  const kit: Part[] = square
+    ? [
+        // An angular helmet with a flat visor slot.
+        [new THREE.CylinderGeometry(7, 8.8, 7.4, 4), PAINT, [0.4, 62, 0], [0, Math.PI / 4, 0], [1.08, 1, 1]],
+        [box(7, 1.4, 7), PAINT_SHADE, [0.2, 66.3, 0]],
+        [box(1.4, 3, 9.4), GLASS, [7.9, 57.8, 0]],
+        [box(1.5, 1.1, 8.6), VISOR, [7.95, 57.9, 0]],
+        [box(1.4, 3, 4), GLASS, [6.5, 57.8, 5.8], [0, -0.75, 0]],
+        [box(1.4, 3, 4), GLASS, [6.5, 57.8, -5.8], [0, 0.75, 0]],
+        // Square shoulder plates, in two layers.
+        [box(7.8, 2.4, 7.4), PAINT, [0.2, 52.6, 10.4], [0.38, 0, 0]],
+        [box(6.6, 2, 6.4), PAINT_SHADE, [0.2, 50.4, 12.2], [0.6, 0, 0]],
+        [box(7.8, 2.4, 7.4), PAINT, [0.2, 52.6, -10.4], [-0.38, 0, 0]],
+        [box(6.6, 2, 6.4), PAINT_SHADE, [0.2, 50.4, -12.2], [-0.6, 0, 0]],
+      ]
+    : [
+        // A rounded combat helmet over a wraparound visor.
+        [
+          new THREE.SphereGeometry(7.6, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55),
+          PAINT,
+          [0.4, 59.6, 0],
+          undefined,
+          [1.08, 0.95, 1.02],
+        ],
+        [box(9.5, 1.2, 2.2), PAINT_SHADE, [0.2, 66.6, 0]],
+        [new THREE.CylinderGeometry(8, 7.6, 3.4, 20, 1, false, Math.PI / 2 - 1.2, 2.4), GLASS, [0.9, 57.4, 0]],
+        [new THREE.CylinderGeometry(8.1, 8, 1.1, 20, 1, false, Math.PI / 2 - 1, 2), VISOR, [0.9, 57.6, 0]],
+        // Rounded shoulder plates, in two layers.
+        [
+          new THREE.SphereGeometry(5.4, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+          PAINT,
+          [0, 51, 10.4],
+          [0.42, 0, 0],
+          [1, 0.75, 1.05],
+        ],
+        [
+          new THREE.SphereGeometry(5.4, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+          PAINT,
+          [0, 51, -10.4],
+          [-0.42, 0, 0],
+          [1, 0.75, 1.05],
+        ],
+        [box(5.6, 1.4, 1.6), PAINT_SHADE, [0, 48.6, 13.4], [0.55, 0, 0]],
+        [box(5.6, 1.4, 1.6), PAINT_SHADE, [0, 48.6, -13.4], [-0.55, 0, 0]],
+      ];
+  kit.push(
+    // Chest plates, angled out from the middle, and a back plate.
+    [box(3, 10.5, 7), PAINT, [6.5, 45.6, 3.3], [0, -0.3, -0.06]],
+    [box(3, 10.5, 7), PAINT, [6.5, 45.6, -3.3], [0, 0.3, -0.06]],
+    [box(1.2, 1.4, 11), PAINT_SHADE, [7.7, 41.2, 0]],
+    [box(3, 13, 12.4), PAINT, [-6.3, 45, 0]],
+    // Forearm guards.
+    [limb(lerp3(elbowR, gripR, 0.22), lerp3(elbowR, gripR, 0.72), 3.1), PAINT, [0, 0, 0]],
+    [limb(lerp3(elbowL, gripL, 0.22), lerp3(elbowL, gripL, 0.72), 3.1), PAINT, [0, 0, 0]],
+    // Running lights on the power pack, and the rifle's handguard, side lights and optic.
+    [box(0.6, 7.5, 1), VISOR, [-11.6, 44.5, 2.6]],
+    [box(0.6, 7.5, 1), VISOR, [-11.6, 44.5, -2.6]],
+    [box(10, 4, 3.8), PAINT, [26.4, 43.9, 4]],
+    [box(8, 0.6, 0.4), VISOR, [13, 44.6, 5.75]],
+    [box(8, 0.6, 0.4), VISOR, [13, 44.6, 2.25]],
+    [new THREE.CylinderGeometry(1.25, 1.25, 0.4, 12), VISOR, [19, 49.4, 4], across],
+  );
+
+  const body = bake(parts).applyMatrix4(LEAN);
+  const kitGeo = bake(kit).applyMatrix4(LEAN);
+  const thigh = bake([
+    [limb([0, 0, 0], [0, -THIGH, 0], 4.3), suit, [0, 0, 0]],
+    [box(1.8, 6.6, 5.6), ARMOUR, [4.1, -5, 0]],
+    [new THREE.CylinderGeometry(4.6, 4.6, 1.4, 12), LEATHER, [0, -9, 0]],
   ]);
-  return { body, kit, thigh, shin };
+  const shin = bake([
+    [limb([0, 0, 0], [0, -SHIN + 1, 0], 3.7), suit, [0, 0, 0]],
+    // Knee pad and shin guard.
+    [sphere(3.5, 12, 8), ARMOUR, [2.5, -0.4, 0], undefined, [0.8, 1.1, 1.05]],
+    [box(1.6, 5.6, 4.6), ARMOUR, [3.3, -5.6, 0]],
+    // A reinforced boot: cuff, upper, toe cap and a thick sole.
+    [new THREE.CylinderGeometry(4.1, 4.3, 3.4, 12), LEATHER, [0.2, -SHIN + 0.4, 0]],
+    [box(9.6, 4.4, 6.8), LEATHER, [1.8, -SHIN - 1.4, 0]],
+    [box(3, 3.4, 6.4), ARMOUR, [5.4, -SHIN - 1.8, 0]],
+    [box(11.2, 1.6, 7.4), RUBBER, [1.9, -SHIN - 4.2, 0]],
+  ]);
+  return { body, kit: kitGeo, thigh, shin };
 }
 
 function droneModel() {
@@ -443,6 +572,29 @@ function titanModel() {
   ]);
 }
 
+/**
+ * Lets a standard material take its roughness, metalness and glow from each vertex (the `surf`
+ * attribute `bake` writes for finishes), so a whole soldier, cloth and steel alike, is one draw.
+ */
+function vertexFinish<M extends THREE.MeshStandardMaterial>(mat: M) {
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader =
+      "attribute vec3 surf;\nvarying vec3 vSurf;\n" +
+      shader.vertexShader.replace("#include <color_vertex>", "#include <color_vertex>\nvSurf = surf;");
+    shader.fragmentShader =
+      "varying vec3 vSurf;\n" +
+      shader.fragmentShader
+        .replace("#include <roughnessmap_fragment>", "float roughnessFactor = vSurf.x;")
+        .replace("#include <metalnessmap_fragment>", "float metalnessFactor = vSurf.y;")
+        .replace(
+          "#include <emissivemap_fragment>",
+          "#include <emissivemap_fragment>\ntotalEmissiveRadiance += vSurf.z * mix(diffuse, vec3(1.0), 0.15) * 1.35;",
+        );
+  };
+  mat.customProgramCacheKey = () => "vertex-finish";
+  return mat;
+}
+
 // ---------------------------------------------------------------------------------------------
 // The world
 
@@ -450,6 +602,10 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
+  // Only soldiers and bots cast real shadows, from a small patch of sun that follows the camera.
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  const phone = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
 
   const scene = new THREE.Scene();
@@ -478,8 +634,24 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const camera = new THREE.PerspectiveCamera(62, 16 / 9, 4, 20000);
   scene.add(new THREE.HemisphereLight("#ffe6c8", "#6b5a40", 1.6));
   const sun = new THREE.DirectionalLight("#ffd7a8", 2.1);
-  sun.position.set(-0.7, 0.8, -0.35);
-  scene.add(sun);
+  const SUN_DIR = new THREE.Vector3(-0.7, 0.8, -0.35).normalize();
+  sun.position.copy(SUN_DIR);
+  sun.castShadow = true;
+  sun.shadow.mapSize.setScalar(phone ? 1024 : 2048);
+  sun.shadow.radius = 2.5;
+  sun.shadow.bias = -0.0005;
+  sun.shadow.normalBias = 0.6;
+  scene.add(sun, sun.target);
+  // A cool light from behind the soldiers, against the sunset, to pick out their edges.
+  const rimLight = new THREE.DirectionalLight("#a8c8ff", 1.1);
+  rimLight.position.set(0.6, 0.45, 0.65);
+  scene.add(rimLight);
+  // Soldiers' metal and paint reflect a soft studio room.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const room = new RoomEnvironment();
+  const studio = own(pmrem.fromScene(room, 0.04).texture);
+  room.dispose();
+  pmrem.dispose();
 
   const tex = (t: THREE.Texture) => {
     t.anisotropy = maxAniso;
@@ -490,6 +662,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const add = (g: THREE.BufferGeometry, m: THREE.Material | THREE.Material[]) => {
     own(g);
     const mesh = new THREE.Mesh(g, m);
+    mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
     scene.add(mesh);
@@ -659,7 +832,12 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     new THREE.MeshBasicMaterial({ color: "#78e6ff", transparent: true, opacity: 0.22, depthWrite: false }),
   );
   const shieldGeo = own(new THREE.SphereGeometry(34, 18, 12));
-  const teamMats = [0, 1].map(() => own(new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.1 })));
+  const teamMats = [0, 1].map(() =>
+    own(vertexFinish(new THREE.MeshStandardMaterial({ vertexColors: true, envMap: studio, envMapIntensity: 0.7 }))),
+  );
+  const gear = own(
+    vertexFinish(new THREE.MeshStandardMaterial({ vertexColors: true, envMap: studio, envMapIntensity: 0.6 })),
+  );
   let colorKey = "";
   const setTeamColors = (colors: string[]) => {
     const key = colors.join(",");
@@ -709,29 +887,38 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     const body = new THREE.Group();
     body.position.y = -HIP;
     roll.add(body);
-    body.add(new THREE.Mesh(m.body, colored));
+    const torso = new THREE.Mesh(m.body, gear);
+    body.add(torso);
     const kit = new THREE.Mesh(m.kit, teamMats[team] ?? teamMats[0]!);
     body.add(kit);
+    const shade = (mesh: THREE.Mesh) => {
+      mesh.castShadow = true;
+      return mesh;
+    };
+    shade(torso);
+    shade(kit);
     const thighs: THREE.Group[] = [];
     const knees: THREE.Group[] = [];
     for (const z of [-4.6, 4.6]) {
       const hip = new THREE.Group();
       hip.position.set(0, HIP, z);
-      hip.add(new THREE.Mesh(m.thigh, colored));
+      // Feet set a little apart.
+      hip.rotation.x = z > 0 ? -0.05 : 0.05;
+      hip.add(shade(new THREE.Mesh(m.thigh, gear)));
       const knee = new THREE.Group();
       knee.position.y = -THIGH;
-      knee.add(new THREE.Mesh(m.shin, colored));
+      knee.add(shade(new THREE.Mesh(m.shin, gear)));
       hip.add(knee);
       body.add(hip);
       thighs.push(hip);
       knees.push(knee);
     }
     const muzzle = new THREE.Sprite(glow);
-    muzzle.position.set(37, 44.3, 4);
+    muzzle.position.copy(MUZZLE);
     muzzle.scale.setScalar(24);
     body.add(muzzle);
     const shadow = new THREE.Mesh(blobGeo, blob);
-    shadow.scale.set(46, 1, 46);
+    shadow.scale.set(40, 1, 40);
     shadow.position.y = 0.5;
     root.add(shadow);
     const shield = new THREE.Mesh(shieldGeo, shieldMat);
@@ -781,6 +968,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const makeBot = (kind: 0 | 1): Bot => {
     const root = new THREE.Group();
     const mesh = new THREE.Mesh(kind === 0 ? droneGeo : titanGeo, kind === 0 ? droneMat : titanMat);
+    mesh.castShadow = true;
     root.add(mesh);
     const shadow = new THREE.Mesh(blobGeo, blob);
     shadow.scale.setScalar(kind === 0 ? 40 : 110);
@@ -853,6 +1041,21 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       camera.lookAt(W / 2, 0, H / 2 - 60);
     }
     camera.updateProjectionMatrix();
+
+    // The sun's shadow covers the patch of ground in view: around the soldier, or the whole map.
+    const reach = f.focus ? 520 : 1500;
+    const sx = f.focus ? f.focus.x + Math.cos(f.focus.yaw) * 220 : W / 2;
+    const sz = f.focus ? f.focus.y + Math.sin(f.focus.yaw) * 220 : H / 2;
+    sun.target.position.set(sx, 0, sz);
+    sun.position.copy(SUN_DIR).multiplyScalar(1500).add(sun.target.position);
+    const sc = sun.shadow.camera;
+    if (sc.right !== reach) {
+      sc.left = sc.bottom = -reach;
+      sc.right = sc.top = reach;
+      sc.near = 100;
+      sc.far = 3200;
+      sc.updateProjectionMatrix();
+    }
 
     // Flags flutter.
     for (const [i, fl] of flags.entries())
