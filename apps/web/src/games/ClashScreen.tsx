@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Crosshair,
+  ChevronsDown,
+  Focus,
   Footprints,
+  ListOrdered,
   Maximize2,
   Minimize2,
   MousePointer2,
   RotateCcw,
   Shield,
+  Undo2,
   Swords,
   Zap,
 } from "lucide-react";
@@ -70,6 +74,21 @@ const STICK_RADIUS = 56;
 const MOUSE_TURN = 0.0028;
 const TOUCH_TURN = 0.008;
 const KEY_TURN = 2.6;
+/** Look speed is a multiplier the player picks, kept on this device. */
+const SENS_KEY = "clash.lookSpeed";
+const SENS_MIN = 0.4;
+const SENS_MAX = 2.5;
+/**
+ * Aiming down the sights zooms in, slows your walk and slows turning, for finer aim at range.
+ * The zoom eases in and out at this rate per second.
+ */
+const AIM_WALK = 0.55;
+const AIM_TURN = 0.6;
+const AIM_ZOOM_RATE = 8;
+/** A quick turn spins you round to face behind you over this long. */
+const QUICK_TURN_MS = 180;
+/** Crouching down or standing up takes about a fifth of a second. */
+const CROUCH_RATE = 5;
 /**
  * Aim help: a shot goes straight at an enemy this close to the crosshair, in radians. Space and
  * the phone's fire button help more, since they can't aim as finely as a mouse.
@@ -122,6 +141,14 @@ const angleDiff = (a: number, b: number) => {
   return d;
 };
 const lerpAngle = (a: number, b: number, t: number) => a + angleDiff(a, b) * t;
+const readSens = () => {
+  try {
+    const v = Number(localStorage.getItem(SENS_KEY));
+    return v >= SENS_MIN && v <= SENS_MAX ? v : 1;
+  } catch {
+    return 1;
+  }
+};
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /** Starts downloading the 3D renderer early, from the lobby, so the game opens straight away. */
@@ -138,6 +165,10 @@ export function ClashScreen({ session, game, meId }: Props) {
   const touch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   const [full, setFull] = useState(touch);
   const [locked, setLocked] = useState(false);
+  const [board, setBoard] = useState(false);
+  const [aiming, setAiming] = useState(false);
+  const [crouching, setCrouching] = useState(false);
+  const [sens, setSens] = useState(readSens);
   const [hud, setHud] = useState<Hud>({
     power: game.power,
     hp: R.playerHp,
@@ -184,7 +215,24 @@ export function ClashScreen({ session, game, meId }: Props) {
     dash: null as { until: number; dx: number; dy: number } | null,
     move: null as Stick | null,
     look: null as Stick | null,
+    /** Right mouse held, or the phone's aim button toggled on. */
+    aimHeld: false,
+    aimToggle: false,
+    /** Crouching, toggled with C or the phone's crouch button. */
+    crouch: false,
+    /** How far down, 0 to 1, eased so the camera sinks smoothly. */
+    low: 0,
+    /** How far into the sights, 0 to 1. */
+    zoom: 0,
+    /** What's left of a quick turn, in radians. */
+    turnLeft: 0,
+    sens: readSens(),
   });
+  controls.current.sens = sens;
+  /** Eliminations and knockouts seen in snapshots since the last full view, for the scoreboard. */
+  const tally = useRef({ since: game.serverNow, k: new Map<number, number>(), d: new Map<number, number>() });
+  if (tally.current.since !== game.serverNow) tally.current = { since: game.serverNow, k: new Map(), d: new Map() };
+  const livePoints = useRef(new Map<number, number>());
   const sent = useRef({ at: 0, body: "" });
   const feedKey = useRef(0);
 
@@ -248,8 +296,14 @@ export function ClashScreen({ session, game, meId }: Props) {
       const npcs = new Map<number, ClashNpcTuple>();
       for (const s of snaps.current.slice(-3)) for (const n of s.npcs) npcs.set(n[0], n);
       const feed: Hud["feed"] = [];
+      const tl = tally.current;
+      for (const p of snap.players) livePoints.current.set(p[0], p[7]);
       for (const f of snap.feed) {
         const [by, what, victim, team] = f;
+        if (what === 0 && snap.now > tl.since) {
+          tl.d.set(victim, (tl.d.get(victim) ?? 0) + 1);
+          if (by >= 0) tl.k.set(by, (tl.k.get(by) ?? 0) + 1);
+        }
         const at = what === 0 ? people.get(victim) : npcs.get(victim);
         if (at)
           burst(
@@ -316,7 +370,9 @@ export function ClashScreen({ session, game, meId }: Props) {
   useEffect(() => {
     const c = controls.current;
     const gameKey = (k: string) =>
-      ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "shift"].includes(k);
+      ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "shift", "q", "tab", "c"].includes(
+        k,
+      );
     const typing = (e: KeyboardEvent) =>
       e.target instanceof HTMLElement &&
       (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
@@ -329,17 +385,28 @@ export function ClashScreen({ session, game, meId }: Props) {
         c.spaceDown = true;
       } else if (k === "shift") {
         if (!e.repeat) c.dodgeAsked = true;
-      } else c.keys.add(k);
+      } else if (k === "c") {
+        if (!e.repeat) {
+          c.crouch = !c.crouch;
+          setCrouching(c.crouch);
+        }
+      } else if (k === "q") {
+        if (!e.repeat && !c.turnLeft) c.turnLeft = Math.PI;
+      } else if (k === "tab") setBoard(true);
+      else c.keys.add(k);
     };
     const up = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (k === " ") c.spaceDown = false;
+      else if (k === "tab") setBoard(false);
       else c.keys.delete(k);
     };
     const blur = () => {
       c.keys.clear();
       c.spaceDown = false;
       c.mouseDown = false;
+      c.aimHeld = false;
+      setBoard(false);
     };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
@@ -400,9 +467,15 @@ export function ClashScreen({ session, game, meId }: Props) {
     const c = controls.current;
     const isLocked = () => document.pointerLockElement === canvas;
     const onMouseMove = (e: MouseEvent) => {
-      if (isLocked() || c.mouseDown) c.yaw += e.movementX * MOUSE_TURN;
+      if (isLocked() || c.mouseDown) c.yaw += e.movementX * MOUSE_TURN * c.sens * (1 - (1 - AIM_TURN) * c.zoom);
     };
     const onMouseDown = (e: MouseEvent) => {
+      // The right button aims down the sights for as long as it's held.
+      if (e.button === 2) {
+        e.preventDefault();
+        c.aimHeld = true;
+        return;
+      }
       if (e.button !== 0) return;
       canvas.focus();
       if (!isLocked() && gameRef.current.isPlayer) {
@@ -413,9 +486,11 @@ export function ClashScreen({ session, game, meId }: Props) {
       c.mouseDown = true;
       c.shotCount++;
     };
-    const onMouseUp = () => {
-      c.mouseDown = false;
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 2) c.aimHeld = false;
+      else if (e.button === 0) c.mouseDown = false;
     };
+    const noMenu = (e: Event) => e.preventDefault();
     const onLockChange = () => setLocked(isLocked());
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
@@ -437,7 +512,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         if (c.move?.id === t.identifier) Object.assign(c.move, { x, y });
         if (c.look?.id === t.identifier) {
           // Dragging on the right turns, like a mouse.
-          c.yaw += (x - c.look.x) * TOUCH_TURN;
+          c.yaw += (x - c.look.x) * TOUCH_TURN * c.sens * (1 - (1 - AIM_TURN) * c.zoom);
           Object.assign(c.look, { x, y });
         }
       }
@@ -451,6 +526,7 @@ export function ClashScreen({ session, game, meId }: Props) {
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
+    canvas.addEventListener("contextmenu", noMenu);
     document.addEventListener("pointerlockchange", onLockChange);
     canvas.addEventListener("touchstart", onTouchStart, { passive: false });
     canvas.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -477,7 +553,24 @@ export function ClashScreen({ session, game, meId }: Props) {
 
       // Turn and move, relative to the way you face.
       const k = c.keys;
-      c.yaw += ((k.has("arrowright") ? 1 : 0) - (k.has("arrowleft") ? 1 : 0)) * KEY_TURN * dt;
+      c.yaw +=
+        ((k.has("arrowright") ? 1 : 0) - (k.has("arrowleft") ? 1 : 0)) *
+        KEY_TURN *
+        c.sens *
+        (1 - (1 - AIM_TURN) * c.zoom) *
+        dt;
+      // A quick turn spins you round to face behind you.
+      if (c.turnLeft > 0) {
+        const step = Math.min(c.turnLeft, ((Math.PI * 1000) / QUICK_TURN_MS) * dt);
+        c.yaw += step;
+        c.turnLeft -= step;
+      }
+      // Into the sights while aiming, out of them when rolling or knocked out.
+      const wantZoom = alive && !c.dash && (c.aimHeld || c.aimToggle) ? 1 : 0;
+      c.zoom += Math.sign(wantZoom - c.zoom) * Math.min(Math.abs(wantZoom - c.zoom), AIM_ZOOM_RATE * dt);
+      if (!alive) c.aimToggle = false;
+      const wantLow = alive && c.crouch ? 1 : 0;
+      c.low += Math.sign(wantLow - c.low) * Math.min(Math.abs(wantLow - c.low), CROUCH_RATE * dt);
       let fwd = 0;
       let side = 0;
       if (c.move) {
@@ -527,7 +620,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         m.x = p.x;
         m.y = p.y;
       } else if (alive && (fwd || side)) {
-        const step = R.playerSpeed * dt;
+        const step = R.playerSpeed * (1 - (1 - AIM_WALK) * c.zoom) * (1 - (1 - R.crouch.speed) * c.low) * dt;
         const p = resolveCircle(
           m.x + (fx * fwd - fy * side) * step,
           m.y + (fy * fwd + fx * side) * step,
@@ -555,7 +648,8 @@ export function ClashScreen({ session, game, meId }: Props) {
           if (alive && d < SPOT_RANGE && lineClear(m.x, m.y, p.x, p.y)) inSight.add(p.n);
           if (
             inSight.has(p.n) ||
-            (alive && d < HEAR_RANGE) ||
+            // A crouching enemy moves quietly enough not to be heard.
+            (alive && d < HEAR_RANGE && !(p.flags & CLASH_FLAG.crouch)) ||
             p.flags & CLASH_FLAG.firing ||
             mates.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < SPOT_RANGE && lineClear(q.x, q.y, p.x, p.y))
           )
@@ -639,6 +733,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         .map((p) => ({ n: p.n, x: p.x, y: p.y, a: p.a, team: teams.current.get(p.n) ?? 0, flags: p.flags }));
       if (alive) {
         let flags = m.flags & CLASH_FLAG.shield;
+        if (c.crouch) flags |= CLASH_FLAG.crouch;
         if (firing) flags |= CLASH_FLAG.firing;
         if (c.dash) flags |= CLASH_FLAG.dodge;
         if (performance.now() - m.hurtAt < 120) flags |= CLASH_FLAG.hurt;
@@ -648,7 +743,14 @@ export function ClashScreen({ session, game, meId }: Props) {
         t,
         still,
         focus: playing
-          ? { x: m.x, y: m.y, yaw: c.yaw, down: m.alive ? 0 : Math.min(1, (performance.now() - m.downAt) / 900) }
+          ? {
+              x: m.x,
+              y: m.y,
+              yaw: c.yaw,
+              down: m.alive ? 0 : Math.min(1, (performance.now() - m.downAt) / 900),
+              zoom: c.zoom,
+              low: c.low,
+            }
           : null,
         players,
         npcs: world.npcs,
@@ -760,6 +862,7 @@ export function ClashScreen({ session, game, meId }: Props) {
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
+      canvas.removeEventListener("contextmenu", noMenu);
       document.removeEventListener("pointerlockchange", onLockChange);
       canvas.removeEventListener("touchstart", onTouchStart);
       canvas.removeEventListener("touchmove", onTouchMove);
@@ -772,6 +875,40 @@ export function ClashScreen({ session, game, meId }: Props) {
     if (game.isPlayer) canvasRef.current?.focus();
   }, [game.isPlayer]);
 
+  // Knocked out drops you out of the sights.
+  useEffect(() => {
+    if (hud.alive) return;
+    controls.current.aimToggle = false;
+    controls.current.crouch = false;
+    setAiming(false);
+    setCrouching(false);
+  }, [hud.alive]);
+
+  const changeSens = (v: number) => {
+    setSens(v);
+    try {
+      localStorage.setItem(SENS_KEY, String(v));
+    } catch {
+      // Private browsing: the setting lasts for this game only.
+    }
+  };
+  const aimNow = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const c = controls.current;
+    c.aimToggle = !c.aimToggle;
+    setAiming(c.aimToggle);
+  };
+  const crouchNow = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const c = controls.current;
+    c.crouch = !c.crouch;
+    setCrouching(c.crouch);
+  };
+  const turnNow = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const c = controls.current;
+    if (!c.turnLeft) c.turnLeft = Math.PI;
+  };
   const dodgeNow = (e: React.PointerEvent) => {
     e.preventDefault();
     controls.current.dodgeAsked = true;
@@ -800,6 +937,29 @@ export function ClashScreen({ session, game, meId }: Props) {
     .toString()
     .padStart(2, "0");
   const leader = hud.power.indexOf(Math.max(...hud.power));
+  const rows = game.players.map((p) => ({
+    n: p.n,
+    team: p.team,
+    name: names.current.get(p.n) ?? "",
+    k: p.eliminations + (tally.current.k.get(p.n) ?? 0),
+    d: p.deaths + (tally.current.d.get(p.n) ?? 0),
+    pts: livePoints.current.get(p.n) ?? p.points,
+  }));
+  const lookSpeed = (
+    <label className="clash-sens">
+      Look speed
+      <input
+        type="range"
+        min={SENS_MIN}
+        max={SENS_MAX}
+        step={0.1}
+        value={sens}
+        onChange={(e) => changeSens(Number(e.target.value))}
+        onKeyDown={(e) => e.stopPropagation()}
+      />
+      <span className="sg-num">{sens.toFixed(1)}x</span>
+    </label>
+  );
 
   return (
     <div className={`clash-stage${full ? " full" : ""}`}>
@@ -910,6 +1070,12 @@ export function ClashScreen({ session, game, meId }: Props) {
                 <kbd>Shift</kbd>
               </span>
             )}
+            {crouching && (
+              <span className="clash-low">
+                <ChevronsDown aria-hidden="true" size={14} />
+                Crouched
+              </span>
+            )}
             <span className="sg-num clash-pts">{hud.points} pts</span>
           </div>
         )}
@@ -936,6 +1102,86 @@ export function ClashScreen({ session, game, meId }: Props) {
           <button type="button" className="clash-fire" aria-label="Fire" {...fireHold}>
             <Crosshair aria-hidden="true" size={30} />
           </button>
+        )}
+        {touch && game.isPlayer && (
+          <button
+            type="button"
+            className={`clash-aim${aiming ? " on" : ""}`}
+            aria-label="Aim down sights"
+            aria-pressed={aiming}
+            onPointerDown={aimNow}
+          >
+            <Focus aria-hidden="true" size={22} />
+          </button>
+        )}
+        {touch && game.isPlayer && (
+          <button
+            type="button"
+            className={`clash-crouch${crouching ? " on" : ""}`}
+            aria-label="Crouch"
+            aria-pressed={crouching}
+            onPointerDown={crouchNow}
+          >
+            <ChevronsDown aria-hidden="true" size={22} />
+          </button>
+        )}
+        {touch && game.isPlayer && (
+          <button type="button" className="clash-turn" aria-label="Turn around" onPointerDown={turnNow}>
+            <Undo2 aria-hidden="true" size={20} />
+          </button>
+        )}
+        {touch && (
+          <button
+            type="button"
+            className="sg-btn ghost icon sm clash-board-btn"
+            aria-label={board ? "Hide scoreboard" : "Show scoreboard"}
+            aria-pressed={board}
+            onClick={() => setBoard((b) => !b)}
+          >
+            <ListOrdered aria-hidden="true" size={16} />
+          </button>
+        )}
+        {board && (
+          <div className="clash-board" role="dialog" aria-label="Scoreboard">
+            {CLASH_TEAMS.map((team, i) => (
+              <section key={i} style={{ "--t": `var(--clash-team-${i})` } as React.CSSProperties}>
+                <h3>
+                  <TeamShape shape={team.shape} />
+                  {team.name}
+                  {i === myTeam && <small> (you)</small>}
+                  <span className="sg-num">{hud.power[i] ?? 0}</span>
+                </h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Player</th>
+                      <th scope="col" title="Tags">
+                        Tags
+                      </th>
+                      <th scope="col" title="Times tagged">
+                        Down
+                      </th>
+                      <th scope="col">Pts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows
+                      .filter((r) => r.team === i)
+                      .sort((a, b) => b.pts - a.pts)
+                      .map((r) => (
+                        <tr key={r.n} className={r.n === game.me?.n ? "me" : ""}>
+                          <td>{r.name}</td>
+                          <td className="sg-num">{r.k}</td>
+                          <td className="sg-num">{r.d}</td>
+                          <td className="sg-num">{r.pts}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </section>
+            ))}
+            {touch && lookSpeed}
+          </div>
         )}
         {touch && (
           <button
@@ -972,10 +1218,13 @@ export function ClashScreen({ session, game, meId }: Props) {
         <p className="clash-help sg-muted">
           <Crosshair aria-hidden="true" size={16} />
           Move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>. Turn with the mouse or <kbd>←</kbd>{" "}
-          <kbd>→</kbd>. Click or hold to fire; <kbd>Space</kbd> fires with aim help; <kbd>Shift</kbd> rolls out of the
-          way of shots. Teammates spot enemies on your minimap, and your base heals you.
+          <kbd>→</kbd>. Click or hold to fire; <kbd>Space</kbd> fires with aim help; hold the right mouse button to aim
+          down the sights. <kbd>Shift</kbd> rolls out of the way of shots, <kbd>C</kbd> crouches (slower, but harder to
+          hit and to hear), <kbd>Q</kbd> turns you around, and holding <kbd>Tab</kbd> shows the scoreboard. Teammates
+          spot enemies on your minimap, and your base heals you.
         </p>
       )}
+      {!touch && game.isPlayer && <div className="clash-settings sg-muted">{lookSpeed}</div>}
       <span className="visually-hidden" aria-live="polite">
         {announce}
       </span>

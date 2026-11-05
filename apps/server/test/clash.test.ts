@@ -62,7 +62,7 @@ const lastSnap = (hooks: RoomHooks) => {
 const input = (
   room: Room,
   id: string,
-  v: Partial<{ x: number; y: number; a: number; f: boolean; s: number; d: number }>,
+  v: Partial<{ x: number; y: number; a: number; f: boolean; s: number; d: number; c: boolean }>,
 ) => {
   const f = state(room).fighters.get(id)!;
   room.inputs.set(id, { value: { x: f.x, y: f.y, a: 0, f: false, s: 0, l: f.life, ...v }, at: Date.now() });
@@ -212,6 +212,31 @@ describe("Core Clash", () => {
     input(room, a.userId, { f: false, a: 0 });
     vi.advanceTimersByTime(600);
     expect(b.hp).toBe(CLASH_RULES.playerHp - CLASH_RULES.shotDamage);
+  });
+
+  it("makes a crouching player a smaller target, and shows it", async () => {
+    const { room, hooks } = makeRoom();
+    await room.start("host");
+    const { a, b } = duel(room);
+    // A shot that would just graze a standing player...
+    Object.assign(b, { y: 60 + CLASH_RULES.crouch.hitRadius + CLASH_RULES.shotRadius + 1 });
+    for (let t = 0; t < 1200; t += CLASH_RULES.tickMs) {
+      input(room, b.userId, { c: true });
+      input(room, a.userId, { f: true, a: 0 });
+      vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    }
+    // ...flies over one who is crouching.
+    expect(b.hp).toBe(CLASH_RULES.playerHp);
+    expect(lastSnap(hooks).players.find((p) => p[0] === b.n)![5] & CLASH_FLAG.crouch).toBeTruthy();
+
+    // Standing up again, the same shots hit.
+    for (let t = 0; t < 600; t += CLASH_RULES.tickMs) {
+      input(room, b.userId, { c: false });
+      input(room, a.userId, { f: true, a: 0 });
+      vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    }
+    expect(b.hp).toBeLessThan(CLASH_RULES.playerHp);
+    expect(lastSnap(hooks).players.find((p) => p[0] === b.n)![5] & CLASH_FLAG.crouch).toBeFalsy();
   });
 
   it("ends when a team reaches the target and awards points and the win bonus once", async () => {

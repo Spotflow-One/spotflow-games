@@ -35,9 +35,11 @@ export interface ClashFrame {
   still: boolean;
   /**
    * The soldier the camera sits behind, facing `yaw`, or null for a view of the whole war zone.
-   * `down` runs from 0 to 1 while knocked out, and lifts the camera up and away.
+   * `down` runs from 0 to 1 while knocked out, and lifts the camera up and away. `zoom` runs
+   * from 0 to 1 while aiming down the sights, and pulls the camera in over the shoulder. `low`
+   * runs from 0 to 1 as the soldier crouches, and lowers the camera with them.
    */
-  focus: { x: number; y: number; yaw: number; down: number } | null;
+  focus: { x: number; y: number; yaw: number; down: number; zoom?: number; low?: number } | null;
   players: ClashFramePlayer[];
   npcs: Array<{ id: number; kind: 0 | 1; x: number; y: number; flags: number }>;
   shots: Array<{ id: number; x: number; y: number; vx: number; vy: number; team: number }>;
@@ -61,6 +63,11 @@ export const CLASH_SHOT_HEIGHT = 38;
 const CAM_BACK = 150;
 const CAM_UP = 80;
 const CAM_SHOULDER = 26;
+/** Aiming down the sights narrows the view and brings the camera this much closer. */
+const CAM_FOV = 62;
+const AIM_FOV = 40;
+const AIM_CLOSER = 45;
+const AIM_SHOULDER = 20;
 /** Cover at least this tall gets between the camera and the soldier. */
 const CAM_BLOCK_HEIGHT = 70;
 
@@ -386,6 +393,8 @@ const lerp3 = (a: number[], b: number[], k: number): [number, number, number] =>
 const HIP = 29;
 const THIGH = 13;
 const SHIN = 11;
+/** Crouching bends the legs and drops the hips this far. */
+const CROUCH_DROP = 11;
 /** The upper body leans into the rifle a little, about the hips: a ready stance. */
 const LEAN = new THREE.Matrix4()
   .makeTranslation(0, HIP, 0)
@@ -918,6 +927,8 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     /** When the current roll started, and which way it goes. */
     rollAt: number;
     rollDir: { x: number; y: number };
+    /** How far into a crouch, 0 to 1. */
+    low: number;
   }
   const soldiers = new Map<number, Soldier>();
   const makeSoldier = (n: number, team: number): Soldier => {
@@ -991,6 +1002,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       phase: 0,
       rollAt: 0,
       rollDir: { x: 1, y: 0 },
+      low: 0,
     };
   };
   const dropSoldier = (n: number) => {
@@ -1056,11 +1068,14 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     // Camera.
     if (f.focus) {
       const { x, y, yaw, down } = f.focus;
+      const zoom = f.focus.zoom ?? 0;
+      const low = f.focus.low ?? 0;
       const fx = Math.cos(yaw);
       const fz = Math.sin(yaw);
-      const back = CAM_BACK + down * 90;
-      const wantX = x - fx * back - fz * CAM_SHOULDER;
-      const wantZ = y - fz * back + fx * CAM_SHOULDER;
+      const back = CAM_BACK - zoom * AIM_CLOSER + down * 90;
+      const shoulder = CAM_SHOULDER + zoom * AIM_SHOULDER;
+      const wantX = x - fx * back - fz * shoulder;
+      const wantZ = y - fz * back + fx * shoulder;
       // The camera stays inside the perimeter, and in front of any tall cover behind you.
       const inside = (from: number, to: number, max: number) => {
         const m = 12;
@@ -1079,9 +1094,13 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       );
       // Pull in at once when a wall gets in the way, and ease back out after.
       camDist = clear < camDist ? clear : camDist + (clear - camDist) * Math.min(1, dt * 4);
-      camera.fov = 62;
-      camera.position.set(x + (wantX - x) * camDist, CAM_UP + down * 140, y + (wantZ - y) * camDist);
-      look.set(x + fx * 320, 36 - down * 20, y + fz * 320);
+      camera.fov = CAM_FOV + (AIM_FOV - CAM_FOV) * zoom;
+      camera.position.set(
+        x + (wantX - x) * camDist,
+        CAM_UP - low * CROUCH_DROP * 1.4 + down * 140,
+        y + (wantZ - y) * camDist,
+      );
+      look.set(x + fx * 320, 36 - low * CROUCH_DROP - down * 20, y + fz * 320);
       camera.lookAt(look);
     } else {
       camDist = 1;
@@ -1146,6 +1165,20 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
           -0.16 - (f.still ? 0 : Math.max(0, Math.cos(s.phase + (i ? Math.PI : 0))) * 0.9 * stride);
       }
       s.body.position.y = -HIP + (f.still ? 0 : Math.abs(Math.sin(s.phase)) * 1.6 * stride);
+      // A crouch: knees bent, hips down, a shorter shuffling step.
+      const wantLow = p.flags & CLASH_FLAG.crouch ? 1 : 0;
+      s.low = f.still ? wantLow : s.low + Math.sign(wantLow - s.low) * Math.min(Math.abs(wantLow - s.low), dt * 5);
+      if (s.low > 0) {
+        const lw = s.low;
+        const crouchStride = Math.min(1, s.speed / (R.playerSpeed * R.crouch.speed));
+        const step = f.still ? 0 : Math.sin(s.phase) * 0.35 * crouchStride;
+        for (let i = 0; i < 2; i++) {
+          const side = i === 0 ? 1 : -1;
+          s.thighs[i]!.rotation.z += (1.25 + step * side - s.thighs[i]!.rotation.z) * lw;
+          s.knees[i]!.rotation.z += (-2.05 - s.knees[i]!.rotation.z) * lw;
+        }
+        s.body.position.y -= CROUCH_DROP * lw;
+      }
 
       // A dodge: a forward roll the way the soldier is moving, tucked up tight.
       const rolling = !!(p.flags & CLASH_FLAG.dodge);
