@@ -5,6 +5,7 @@
  * it. A ground point (x, y) sits at (x, height, y) here, so the world's y axis points up.
  */
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import {
   CLASH_CENTER,
@@ -66,9 +67,22 @@ const CAM_BLOCK_HEIGHT = 70;
 // ---------------------------------------------------------------------------------------------
 // Geometry helpers
 
+/**
+ * How a surface looks: a colour plus how rough, how metallic, how brightly it glows and how much
+ * camouflage is printed on it. Only the soldier materials read the last four; see `vertexFinish`.
+ */
+interface Finish {
+  c: string;
+  r: number;
+  m: number;
+  g?: number;
+  /** Printed with camouflage, 0 to 1. */
+  k?: number;
+}
+
 type Part = [
   geo: THREE.BufferGeometry,
-  color: string,
+  color: string | Finish,
   pos: [number, number, number],
   rot?: [number, number, number],
   scale?: [number, number, number],
@@ -76,6 +90,8 @@ type Part = [
 
 /** Many coloured primitives baked into one geometry, so a model is one draw call. */
 function bake(parts: Part[], keepUv = false) {
+  // With any finish in the mix, every part carries one (merging needs matching attributes).
+  const finished = parts.some(([, color]) => typeof color !== "string");
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const e = new THREE.Euler();
@@ -90,11 +106,17 @@ function bake(parts: Part[], keepUv = false) {
         ),
       );
     if (!keepUv) g.deleteAttribute("uv");
-    const c = new THREE.Color(color);
+    const fin = typeof color === "string" ? { c: color, r: 0.8, m: 0.05 } : color;
+    const c = new THREE.Color(fin.c);
     const n = g.attributes.position!.count;
     const col = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) col.set([c.r, c.g, c.b], i * 3);
+    const surf = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      col.set([c.r, c.g, c.b], i * 3);
+      surf.set([fin.r, fin.m, fin.g ?? 0, fin.k ?? 0], i * 4);
+    }
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    if (finished) g.setAttribute("surf", new THREE.BufferAttribute(surf, 4));
     return g;
   });
   // Some primitives (like the octahedron) come without an index; merging needs all or none.
@@ -325,100 +347,208 @@ function flagTexture(team: number, color: string) {
 // ---------------------------------------------------------------------------------------------
 // Models
 
-const SKIN = ["#8d5a3b", "#c68a5a", "#5e3a24", "#e0b48c", "#a86e45", "#6b4129"];
-const PANTS = "#3b3f33";
-const GEAR = "#4b5137";
-const DARK = "#1d1e22";
+// Soldier finishes: special-forces kit in camouflage, coyote and ranger green, with black gloves,
+// pads and rifle. The team colour is in the kit mesh (painted white here and tinted by the team's
+// material): helmet stripe, glowing visor and strobe, armbands, chest patch and pack lights.
+const CAMO: Finish = { c: "#9a8866", r: 0.9, m: 0, k: 1 };
+const COYOTE: Finish = { c: "#6e5b40", r: 0.85, m: 0 };
+const RANGER: Finish = { c: "#4e5240", r: 0.85, m: 0 };
+const BLACK: Finish = { c: "#1d1e21", r: 0.8, m: 0 };
+const HELMET: Finish = { c: "#9a9a8c", r: 0.55, m: 0.15 };
+const ARMOUR: Finish = { c: "#33363b", r: 0.5, m: 0.35 };
+const METAL: Finish = { c: "#9da3ab", r: 0.3, m: 0.95 };
+const GUN: Finish = { c: "#222428", r: 0.45, m: 0.5 };
+const FURNITURE: Finish = { c: "#6f5c43", r: 0.7, m: 0.05 };
+const RUBBER: Finish = { c: "#141518", r: 0.9, m: 0 };
+const BOOT: Finish = { c: "#5e4b33", r: 0.75, m: 0 };
+const PAINT: Finish = { c: "#ffffff", r: 0.5, m: 0.1 };
+/** Dark, glossy goggle glass, and the light that glows through it in the team colour. */
+const GLASS: Finish = { c: "#2a2d33", r: 0.08, m: 0.4 };
+const VISOR: Finish = { c: "#2a2e34", r: 0.12, m: 0.2, g: 1 };
 
 /** A rounded limb from one joint to another. */
 function limb(a: [number, number, number], b: [number, number, number], r: number) {
   const from = new THREE.Vector3(...a);
   const dir = new THREE.Vector3(...b).sub(from);
-  const g = new THREE.CapsuleGeometry(r, dir.length(), 3, 8);
+  const g = new THREE.CapsuleGeometry(r, dir.length(), 3, 10);
   g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize()));
   g.translate(from.x + dir.x / 2, from.y + dir.y / 2, from.z + dir.z / 2);
   return g;
 }
 
+const lerp3 = (a: number[], b: number[], k: number): [number, number, number] => [
+  a[0]! + (b[0]! - a[0]!) * k,
+  a[1]! + (b[1]! - a[1]!) * k,
+  a[2]! + (b[2]! - a[2]!) * k,
+];
+
 /** Where the hips are. Legs hang from here, and a roll spins the soldier about this height. */
 const HIP = 29;
 const THIGH = 13;
 const SHIN = 11;
+/** The upper body leans into the rifle a little, about the hips: a ready stance. */
+const LEAN = new THREE.Matrix4()
+  .makeTranslation(0, HIP, 0)
+  .multiply(new THREE.Matrix4().makeRotationZ(-0.07))
+  .multiply(new THREE.Matrix4().makeTranslation(0, -HIP, 0));
+/** The rifle's muzzle, where the flash goes. */
+const MUZZLE = new THREE.Vector3(41.5, 44.3, 4).applyMatrix4(LEAN);
 
 /**
- * A soldier facing +x, about 64 units tall, holding a rifle at the ready on their right (+z).
- * Team-coloured clothes are a separate mesh, and the legs are jointed so they can walk and tuck.
+ * A special-forces operator facing +x, about 66 units tall, holding a rifle at the ready on their
+ * right (+z). The team-coloured markings and glowing goggles are a separate mesh (the kit), and
+ * the legs are jointed so they can walk and tuck.
  */
 function soldierModel(n: number, team: number) {
-  const skin = SKIN[n % SKIN.length]!;
+  const square = CLASH_TEAMS[team]?.shape === "square";
   const shoulderR: [number, number, number] = [0, 49, 9.5];
   const shoulderL: [number, number, number] = [0, 49, -9.5];
   const elbowR: [number, number, number] = [3, 40, 12];
   const elbowL: [number, number, number] = [11, 41, -6];
   const gripR: [number, number, number] = [10, 40.5, 4.5];
   const gripL: [number, number, number] = [21, 43, 4];
-  const body = bake([
-    // Head, face and neck.
-    [new THREE.CylinderGeometry(2.8, 3.2, 5, 8), skin, [0.5, 53.5, 0]],
-    [sphere(6, 14, 12), skin, [0.8, 59, 0], undefined, [1, 1.12, 0.92]],
-    [box(2, 2.6, 1.8), skin, [6.6, 58.4, 0], [0, 0, -0.2]],
-    [sphere(0.9, 6, 4), DARK, [5.7, 60, 2.2]],
-    [sphere(0.9, 6, 4), DARK, [5.7, 60, -2.2]],
-    [box(0.8, 0.7, 3), "#5a2e22", [6.2, 55.6, 0]],
-    [sphere(1.6, 6, 6), skin, [0.4, 58.5, 5.7], undefined, [0.6, 1, 0.5]],
-    [sphere(1.6, 6, 6), skin, [0.4, 58.5, -5.7], undefined, [0.6, 1, 0.5]],
-    // Hips, belt, chest rig and backpack.
-    [box(9, 8, 15), PANTS, [0, HIP + 2, 0]],
-    [box(10, 2.5, 16), DARK, [0, HIP + 6, 0]],
-    [box(3, 12, 13), GEAR, [6.4, 43, 0]],
-    [box(2.4, 4, 3.5), GEAR, [8.3, 39, 3.6]],
-    [box(2.4, 4, 3.5), GEAR, [8.3, 39, -3.6]],
-    [box(7, 15, 13), GEAR, [-8.6, 43, 0]],
-    [box(4, 4, 11), "#3e4330", [-8.6, 52, 0]],
-    // Gloved hands.
-    [sphere(2.5, 8, 6), DARK, gripR],
-    [sphere(2.5, 8, 6), DARK, gripL],
-    // The rifle.
-    [box(17, 4.5, 3.4), "#2a2b30", [14, 43.5, 4]],
-    [box(9, 4.5, 3), "#2a2b30", [1.5, 42.5, 4]],
-    [new THREE.CylinderGeometry(1.1, 1.1, 14, 6), DARK, [29, 44.3, 4], [0, 0, Math.PI / 2]],
-    [box(3.5, 8, 3), DARK, [15, 38, 4], [0, 0, 0.25]],
-    [box(4, 1.8, 2), DARK, [12, 46.6, 4]],
-    [box(3, 4, 2.6), DARK, [8.5, 39.5, 4], [0, 0, -0.3]],
-  ]);
-  const helmet =
-    CLASH_TEAMS[team]?.shape === "square"
-      ? [
-          // A patrol cap with a peak.
-          box(12.5, 5, 12.5).translate(0.4, 63.2, 0),
-          box(5.5, 1.2, 10).translate(8.5, 61.4, 0),
-        ]
-      : [
-          // A round combat helmet.
-          new THREE.SphereGeometry(7.2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)
-            .scale(1.06, 0.95, 1)
-            .translate(0.6, 60.5, 0),
-          new THREE.CylinderGeometry(7.6, 7.8, 1.4, 16).translate(0.6, 60.6, 0),
-        ];
-  const parts = [
-    // Jacket: a chest broader at the shoulders, with sleeves down to the gloves.
-    new THREE.CylinderGeometry(10, 7.6, 19, 12).scale(0.66, 1, 1).translate(0, 43, 0),
-    sphere(4.3).translate(...shoulderR),
-    sphere(4.3).translate(...shoulderL),
-    limb(shoulderR, elbowR, 3.2),
-    limb(elbowR, gripR, 2.8),
-    limb(shoulderL, elbowL, 3.2),
-    limb(elbowL, gripL, 2.8),
-    ...helmet,
+  const across: [number, number, number] = [0, 0, Math.PI / 2];
+  const sideways: [number, number, number] = [Math.PI / 2, 0, 0];
+  const parts: Part[] = [
+    // Head in a black balaclava, a neck gaiter, and a respirator over the mouth.
+    [sphere(5.6, 16, 12), BLACK, [0.8, 59, 0], undefined, [1, 1.1, 0.92]],
+    [new THREE.CylinderGeometry(3.3, 3.8, 5, 12), BLACK, [0.5, 53.5, 0]],
+    [sphere(3.3, 12, 8), ARMOUR, [5.4, 55.2, 0], undefined, [0.8, 0.85, 1.15]],
+    [new THREE.CylinderGeometry(1.1, 1.1, 1.8, 10), METAL, [6.1, 54.6, 2.2], [0, 0.45, Math.PI / 2]],
+    [new THREE.CylinderGeometry(1.1, 1.1, 1.8, 10), METAL, [6.1, 54.6, -2.2], [0, -0.45, Math.PI / 2]],
+    // Headset cups, and the night-vision mount on the front of the helmet.
+    [new THREE.CylinderGeometry(2.6, 2.6, 2, 16), BLACK, [0.6, 58.2, 7.4], sideways],
+    [new THREE.CylinderGeometry(2.6, 2.6, 2, 16), BLACK, [0.6, 58.2, -7.4], sideways],
+    [box(2, 2.6, 3.4), BLACK, [7.6, 63.4, 0], [0, 0, -0.35]],
+    [box(1.4, 1.4, 1.4), METAL, [8.4, 62, 0]],
+    // Torso in a camouflage combat shirt.
+    [new THREE.CylinderGeometry(9.2, 7.4, 19, 16), CAMO, [0, 43, 0], undefined, [0.62, 1, 1]],
+    // Plate carrier: front and back plates, cummerbund and shoulder straps.
+    [box(3.6, 12, 12.4), COYOTE, [6.3, 44.6, 0]],
+    [box(3.6, 13, 12.4), COYOTE, [-6.3, 45, 0]],
+    [box(10, 7, 1.6), COYOTE, [0, 40.6, 8.4]],
+    [box(10, 7, 1.6), COYOTE, [0, 40.6, -8.4]],
+    [box(12.6, 1.6, 3.2), COYOTE, [0, 51.4, 5.2]],
+    [box(12.6, 1.6, 3.2), COYOTE, [0, 51.4, -5.2]],
+    // Webbing rows, a triple magazine pouch with the mags showing, and an admin pouch.
+    [box(0.6, 0.7, 11.6), RANGER, [8.2, 48.6, 0]],
+    [box(0.6, 0.7, 11.6), RANGER, [8.2, 46.8, 0]],
+    [box(2.8, 5, 3.4), RANGER, [9.4, 40.6, -3.8]],
+    [box(2.8, 5, 3.4), RANGER, [9.4, 40.6, 0]],
+    [box(2.8, 5, 3.4), RANGER, [9.4, 40.6, 3.8]],
+    [box(1.8, 1.6, 2.6), GUN, [9.4, 43.6, -3.8]],
+    [box(1.8, 1.6, 2.6), GUN, [9.4, 43.6, 0]],
+    [box(1.8, 1.6, 2.6), GUN, [9.4, 43.6, 3.8]],
+    [box(1.6, 3.6, 6.4), RANGER, [8.8, 46.6, 0]],
+    // Assault pack, and a radio with its antenna.
+    [box(4.8, 11, 9.8), RANGER, [-10.2, 44, 0]],
+    [box(1.4, 6, 7.6), COYOTE, [-12.8, 43, 0]],
+    [box(3.2, 5, 3), BLACK, [-9.6, 51.2, -3.4]],
+    [new THREE.CylinderGeometry(0.3, 0.45, 13, 6), BLACK, [-10.4, 59.6, -3.6], [0.12, 0, 0.12]],
+    // Shoulders and arms in the combat shirt, with elbow pads and black gloves.
+    [sphere(4.1, 12, 8), CAMO, shoulderR],
+    [sphere(4.1, 12, 8), CAMO, shoulderL],
+    [limb(shoulderR, elbowR, 3.1), CAMO, [0, 0, 0]],
+    [limb(elbowR, gripR, 2.7), CAMO, [0, 0, 0]],
+    [limb(shoulderL, elbowL, 3.1), CAMO, [0, 0, 0]],
+    [limb(elbowL, gripL, 2.7), CAMO, [0, 0, 0]],
+    [sphere(3.1, 12, 8), BLACK, elbowR, undefined, [1, 1, 0.9]],
+    [sphere(3.1, 12, 8), BLACK, elbowL, undefined, [1, 1, 0.9]],
+    [limb(lerp3(elbowR, gripR, 0.8), lerp3(elbowR, gripR, 0.92), 2.9), BLACK, [0, 0, 0]],
+    [limb(lerp3(elbowL, gripL, 0.8), lerp3(elbowL, gripL, 0.92), 2.9), BLACK, [0, 0, 0]],
+    [sphere(2.6, 12, 8), BLACK, gripR, undefined, [1.2, 0.95, 1.05]],
+    [sphere(2.6, 12, 8), BLACK, gripL, undefined, [1.2, 0.95, 1.05]],
+    [box(1.6, 1.2, 2.8), ARMOUR, [gripR[0] + 0.4, gripR[1] + 2, gripR[2]]],
+    [box(1.6, 1.2, 2.8), ARMOUR, [gripL[0] + 0.4, gripL[1] + 2, gripL[2]]],
+    // Hips in camouflage trousers, and the battle belt with its buckle, pouches and holster.
+    [box(9, 8, 15), CAMO, [0, HIP + 2, 0]],
+    [box(10.6, 2.8, 16.4), RANGER, [0, HIP + 6, 0]],
+    [box(1.2, 2.2, 3.6), METAL, [5.5, HIP + 6, 0]],
+    [box(3.4, 4, 3.4), COYOTE, [2.6, HIP + 4.4, -8.6]],
+    [box(3.4, 4, 3.4), RANGER, [-3, HIP + 4.4, 8.4]],
+    [box(3.4, 4, 3.4), COYOTE, [-3, HIP + 4.4, -8.4]],
+    [box(4.6, 3.6, 3), RANGER, [-5.6, HIP + 4.6, 0]],
+    [box(4, 7, 2.2), BLACK, [1.6, HIP + 1.6, 9.2], [0, 0, 0.12]],
+    // The rifle: black, with coyote furniture, an optic, a light and a suppressor.
+    [box(1.6, 5.8, 3), RUBBER, [-3.3, 42.3, 4]],
+    [box(8, 3.6, 2.6), FURNITURE, [1, 42.6, 4], [0, 0, 0.04]],
+    [box(16, 4.8, 3.4), GUN, [14, 43.5, 4]],
+    [box(16, 1.2, 2.2), GUN, [16, 46.5, 4]],
+    [box(3.4, 7.5, 2.8), FURNITURE, [16.6, 38.2, 4], [0, 0, 0.22]],
+    [box(2.8, 5.4, 2.4), FURNITURE, [9, 39.4, 4], [0, 0, -0.3]],
+    [box(11, 4, 3.8), GUN, [26.8, 43.9, 4]],
+    [box(3, 2.2, 1.6), METAL, [14.5, 47.6, 4]],
+    [new THREE.CylinderGeometry(1.6, 1.6, 7.5, 14), GUN, [14, 49.4, 4], across],
+    [new THREE.CylinderGeometry(2, 1.6, 1.4, 14), GUN, [18.2, 49.4, 4], across],
+    [new THREE.CylinderGeometry(1, 1, 4, 10), METAL, [34, 44.3, 4], across],
+    [new THREE.CylinderGeometry(1.7, 1.7, 7, 14), GUN, [38.4, 44.3, 4], across],
+    [new THREE.CylinderGeometry(1.1, 1.1, 4, 10), BLACK, [28, 43.6, 6.6], across],
+    [box(2.6, 4.2, 2.4), FURNITURE, [27, 40.4, 4]],
   ];
-  const kit = mergeGeometries(parts)!;
-  for (const p of parts) p.dispose();
-  const thigh = bake([[limb([0, 0, 0], [0, -THIGH, 0], 4.2), PANTS, [0, 0, 0]]]);
-  const shin = bake([
-    [limb([0, 0, 0], [0, -SHIN + 1, 0], 3.6), PANTS, [0, 0, 0]],
-    [box(10, 4.5, 6.5), DARK, [1.8, -SHIN - 1.5, 0]],
+  // A little something per operator: a dump pouch, a light on the shoulder strap, or a knife.
+  if (n % 3 === 0) parts.push([box(3.6, 4.6, 3.6), RANGER, [2.6, HIP + 3.6, 9.6]]);
+  else if (n % 3 === 1) parts.push([new THREE.CylinderGeometry(1.2, 1, 2.6, 12), BLACK, [5, 51.4, -5.2], across]);
+  else parts.push([box(1.2, 5.6, 1.8), BLACK, [7.6, 47, 5.4], [0, 0, 0.5]]);
+
+  const kit: Part[] = square
+    ? [
+        // An angular maritime helmet with flat goggles.
+        [new THREE.CylinderGeometry(7.2, 8.8, 6.6, 4), HELMET, [0.4, 62.4, 0], [0, Math.PI / 4, 0], [1.08, 1, 1]],
+        [box(1.4, 3, 9.4), GLASS, [7.9, 57.8, 0]],
+        [box(1.5, 1.1, 8.6), VISOR, [7.95, 57.9, 0]],
+        [box(1.4, 3, 4), GLASS, [6.5, 57.8, 5.8], [0, -0.75, 0]],
+        [box(1.4, 3, 4), GLASS, [6.5, 57.8, -5.8], [0, 0.75, 0]],
+        [box(9, 0.8, 1.8), PAINT, [0.3, 65.8, 0]],
+      ]
+    : [
+        // A rounded high-cut helmet with side rails, over wraparound goggles.
+        [
+          new THREE.SphereGeometry(7.6, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
+          HELMET,
+          [0.4, 59.8, 0],
+          undefined,
+          [1.08, 0.95, 1.02],
+        ],
+        [new THREE.CylinderGeometry(8, 7.6, 3.4, 24, 1, false, Math.PI / 2 - 1.2, 2.4), GLASS, [0.9, 57.4, 0]],
+        [new THREE.CylinderGeometry(8.1, 8, 1.1, 24, 1, false, Math.PI / 2 - 1, 2), VISOR, [0.9, 57.6, 0]],
+        [box(9.6, 0.8, 1.8), PAINT, [0.2, 66.6, 0]],
+      ];
+  kit.push(
+    // Helmet rails and a strobe glowing in the team colour.
+    [box(7.4, 1.2, 1), ARMOUR, [0.2, 60.4, 7.9]],
+    [box(7.4, 1.2, 1), ARMOUR, [0.2, 60.4, -7.9]],
+    [box(2, 1.2, 2), VISOR, [-3.6, 66.6, 0]],
+    // Team armbands, a patch on the chest, and lights on the pack and the rifle.
+    [limb(lerp3(shoulderR, elbowR, 0.3), lerp3(shoulderR, elbowR, 0.55), 3.35), PAINT, [0, 0, 0]],
+    [limb(lerp3(shoulderL, elbowL, 0.3), lerp3(shoulderL, elbowL, 0.55), 3.35), PAINT, [0, 0, 0]],
+    [box(0.4, 2.2, 4.2), PAINT, [9.7, 46.6, 0]],
+    [box(0.6, 7.5, 1), VISOR, [-12.8, 44, 3.6]],
+    [box(0.6, 7.5, 1), VISOR, [-12.8, 44, -3.6]],
+    [box(8, 0.6, 0.4), VISOR, [26.8, 44.8, 5.95]],
+    [box(8, 0.6, 0.4), VISOR, [26.8, 44.8, 2.05]],
+    [new THREE.CylinderGeometry(1.25, 1.25, 0.4, 14), VISOR, [19, 49.4, 4], across],
+  );
+
+  const body = bake(parts).applyMatrix4(LEAN);
+  const kitGeo = bake(kit).applyMatrix4(LEAN);
+  const thigh = bake([
+    [limb([0, 0, 0], [0, -THIGH, 0], 4.3), CAMO, [0, 0, 0]],
+    // A thigh pocket and a strap.
+    [box(2, 5.4, 4.6), CAMO, [0.6, -6.4, 3.4], [0, 0.6, 0]],
+    [new THREE.CylinderGeometry(4.5, 4.5, 1.2, 14), BLACK, [0, -3, 0]],
   ]);
-  return { body, kit, thigh, shin };
+  const shin = bake([
+    [limb([0, 0, 0], [0, -SHIN + 1, 0], 3.7), CAMO, [0, 0, 0]],
+    // Knee pad.
+    [sphere(3.6, 14, 8), BLACK, [2.5, -0.4, 0], undefined, [0.8, 1.1, 1.05]],
+    [box(1, 4.6, 3.2), ARMOUR, [3.5, -0.4, 0]],
+    // Coyote assault boots: cuff, upper, toe cap and a thick black sole.
+    [new THREE.CylinderGeometry(4.1, 4.3, 4, 14), BOOT, [0.2, -SHIN + 0.2, 0]],
+    [box(9.6, 4.4, 6.8), BOOT, [1.8, -SHIN - 1.4, 0]],
+    [box(3, 3, 6.4), BLACK, [5.6, -SHIN - 1.9, 0]],
+    [box(11.2, 1.6, 7.4), RUBBER, [1.9, -SHIN - 4.2, 0]],
+  ]);
+  return { body, kit: kitGeo, thigh, shin };
 }
 
 function droneModel() {
@@ -443,6 +573,65 @@ function titanModel() {
   ]);
 }
 
+/**
+ * Lets a standard material take its roughness, metalness and glow from each vertex (the `surf`
+ * attribute `bake` writes for finishes), so a whole soldier, cloth and steel alike, is one draw.
+ */
+function vertexFinish<M extends THREE.MeshStandardMaterial>(mat: M) {
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader =
+      "attribute vec4 surf;\nvarying vec4 vSurf;\nvarying vec3 vLocal;\n" +
+      shader.vertexShader.replace(
+        "#include <color_vertex>",
+        "#include <color_vertex>\nvSurf = surf;\nvLocal = position;",
+      );
+    shader.fragmentShader =
+      `varying vec4 vSurf;
+varying vec3 vLocal;
+float hash3(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1) * 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x), mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
+    mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y),
+    f.z);
+}
+` +
+      shader.fragmentShader
+        .replace(
+          "#include <color_fragment>",
+          `#include <color_fragment>
+// Fine grain on every surface, so nothing reads as flat plastic.
+float grain = noise3(vLocal * 2.3);
+diffuseColor.rgb *= 0.9 + 0.2 * grain;
+// Multi-tone camouflage, in the soldier's own space so it moves with them.
+if (vSurf.w > 0.0) {
+  vec3 q = vLocal + vec3(0.0, 40.0, 0.0);
+  float a = noise3(q * 0.16 + 3.1) * 0.7 + noise3(q * 0.42) * 0.3;
+  float b = noise3(q * 0.22 + 17.0) * 0.7 + noise3(q * 0.55 + 9.0) * 0.3;
+  vec3 camo = vec3(0.16, 0.13, 0.085);
+  camo = mix(camo, vec3(0.065, 0.05, 0.03), smoothstep(0.52, 0.55, a));
+  camo = mix(camo, vec3(0.05, 0.065, 0.032), smoothstep(0.54, 0.57, b));
+  camo = mix(camo, vec3(0.27, 0.23, 0.15), smoothstep(0.74, 0.77, 1.0 - a));
+  diffuseColor.rgb = mix(diffuseColor.rgb, camo * (0.9 + 0.2 * grain), vSurf.w);
+}`,
+        )
+        .replace("#include <roughnessmap_fragment>", "float roughnessFactor = vSurf.x;")
+        .replace("#include <metalnessmap_fragment>", "float metalnessFactor = vSurf.y;")
+        .replace(
+          "#include <emissivemap_fragment>",
+          "#include <emissivemap_fragment>\ntotalEmissiveRadiance += vSurf.z * mix(diffuse, vec3(1.0), 0.15) * 1.35;",
+        );
+  };
+  mat.customProgramCacheKey = () => "vertex-finish";
+  return mat;
+}
+
 // ---------------------------------------------------------------------------------------------
 // The world
 
@@ -450,6 +639,10 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
+  // Only soldiers and bots cast real shadows, from a small patch of sun that follows the camera.
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  const phone = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
 
   const scene = new THREE.Scene();
@@ -478,8 +671,24 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const camera = new THREE.PerspectiveCamera(62, 16 / 9, 4, 20000);
   scene.add(new THREE.HemisphereLight("#ffe6c8", "#6b5a40", 1.6));
   const sun = new THREE.DirectionalLight("#ffd7a8", 2.1);
-  sun.position.set(-0.7, 0.8, -0.35);
-  scene.add(sun);
+  const SUN_DIR = new THREE.Vector3(-0.7, 0.8, -0.35).normalize();
+  sun.position.copy(SUN_DIR);
+  sun.castShadow = true;
+  sun.shadow.mapSize.setScalar(phone ? 1024 : 2048);
+  sun.shadow.radius = 2.5;
+  sun.shadow.bias = -0.0005;
+  sun.shadow.normalBias = 0.6;
+  scene.add(sun, sun.target);
+  // A cool light from behind the soldiers, against the sunset, to pick out their edges.
+  const rimLight = new THREE.DirectionalLight("#a8c8ff", 1.1);
+  rimLight.position.set(0.6, 0.45, 0.65);
+  scene.add(rimLight);
+  // Soldiers' metal and paint reflect a soft studio room.
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const room = new RoomEnvironment();
+  const studio = own(pmrem.fromScene(room, 0.04).texture);
+  room.dispose();
+  pmrem.dispose();
 
   const tex = (t: THREE.Texture) => {
     t.anisotropy = maxAniso;
@@ -490,6 +699,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const add = (g: THREE.BufferGeometry, m: THREE.Material | THREE.Material[]) => {
     own(g);
     const mesh = new THREE.Mesh(g, m);
+    mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
     scene.add(mesh);
@@ -659,7 +869,15 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     new THREE.MeshBasicMaterial({ color: "#78e6ff", transparent: true, opacity: 0.22, depthWrite: false }),
   );
   const shieldGeo = own(new THREE.SphereGeometry(34, 18, 12));
-  const teamMats = [0, 1].map(() => own(new THREE.MeshStandardMaterial({ roughness: 0.6, metalness: 0.1 })));
+  const teamMats = [0, 1].map(() =>
+    own(vertexFinish(new THREE.MeshStandardMaterial({ vertexColors: true, envMap: studio, envMapIntensity: 0.7 }))),
+  );
+  const gearHurt = own(
+    new THREE.MeshStandardMaterial({ color: "#ffffff", emissive: "#ffffff", emissiveIntensity: 0.6 }),
+  );
+  const gear = own(
+    vertexFinish(new THREE.MeshStandardMaterial({ vertexColors: true, envMap: studio, envMapIntensity: 0.6 })),
+  );
   let colorKey = "";
   const setTeamColors = (colors: string[]) => {
     const key = colors.join(",");
@@ -686,6 +904,8 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     roll: THREE.Group;
     body: THREE.Group;
     kit: THREE.Mesh;
+    /** Everything but the kit, which all flashes when hit. */
+    gear: THREE.Mesh[];
     thighs: THREE.Group[];
     knees: THREE.Group[];
     muzzle: THREE.Sprite;
@@ -709,29 +929,44 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     const body = new THREE.Group();
     body.position.y = -HIP;
     roll.add(body);
-    body.add(new THREE.Mesh(m.body, colored));
+    const torso = new THREE.Mesh(m.body, gear);
+    body.add(torso);
     const kit = new THREE.Mesh(m.kit, teamMats[team] ?? teamMats[0]!);
     body.add(kit);
+    // Soldiers shade themselves too: the helmet over the face, an arm across the chest.
+    const shade = (mesh: THREE.Mesh) => {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      return mesh;
+    };
+    shade(torso);
+    shade(kit);
+    const gearMeshes: THREE.Mesh[] = [torso];
     const thighs: THREE.Group[] = [];
     const knees: THREE.Group[] = [];
     for (const z of [-4.6, 4.6]) {
       const hip = new THREE.Group();
       hip.position.set(0, HIP, z);
-      hip.add(new THREE.Mesh(m.thigh, colored));
+      // Feet set a little apart.
+      hip.rotation.x = z > 0 ? -0.05 : 0.05;
+      const thigh = shade(new THREE.Mesh(m.thigh, gear));
+      hip.add(thigh);
       const knee = new THREE.Group();
       knee.position.y = -THIGH;
-      knee.add(new THREE.Mesh(m.shin, colored));
+      const shin = shade(new THREE.Mesh(m.shin, gear));
+      knee.add(shin);
+      gearMeshes.push(thigh, shin);
       hip.add(knee);
       body.add(hip);
       thighs.push(hip);
       knees.push(knee);
     }
     const muzzle = new THREE.Sprite(glow);
-    muzzle.position.set(37, 44.3, 4);
+    muzzle.position.copy(MUZZLE);
     muzzle.scale.setScalar(24);
     body.add(muzzle);
     const shadow = new THREE.Mesh(blobGeo, blob);
-    shadow.scale.set(46, 1, 46);
+    shadow.scale.set(40, 1, 40);
     shadow.position.y = 0.5;
     root.add(shadow);
     const shield = new THREE.Mesh(shieldGeo, shieldMat);
@@ -744,6 +979,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       roll,
       body,
       kit,
+      gear: gearMeshes,
       thighs,
       knees,
       muzzle,
@@ -781,6 +1017,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const makeBot = (kind: 0 | 1): Bot => {
     const root = new THREE.Group();
     const mesh = new THREE.Mesh(kind === 0 ? droneGeo : titanGeo, kind === 0 ? droneMat : titanMat);
+    mesh.castShadow = true;
     root.add(mesh);
     const shadow = new THREE.Mesh(blobGeo, blob);
     shadow.scale.setScalar(kind === 0 ? 40 : 110);
@@ -854,6 +1091,21 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     }
     camera.updateProjectionMatrix();
 
+    // The sun's shadow covers the patch of ground in view: around the soldier, or the whole map.
+    const reach = f.focus ? 520 : 1500;
+    const sx = f.focus ? f.focus.x + Math.cos(f.focus.yaw) * 220 : W / 2;
+    const sz = f.focus ? f.focus.y + Math.sin(f.focus.yaw) * 220 : H / 2;
+    sun.target.position.set(sx, 0, sz);
+    sun.position.copy(SUN_DIR).multiplyScalar(1500).add(sun.target.position);
+    const sc = sun.shadow.camera;
+    if (sc.right !== reach) {
+      sc.left = sc.bottom = -reach;
+      sc.right = sc.top = reach;
+      sc.near = 100;
+      sc.far = 3200;
+      sc.updateProjectionMatrix();
+    }
+
     // Flags flutter.
     for (const [i, fl] of flags.entries())
       fl.mesh.rotation.y = (i === 0 ? 0 : Math.PI) + (f.still ? 0 : Math.sin(f.t / 500 + i) * 0.25);
@@ -923,6 +1175,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
         s.roll.scale.setScalar(1);
       }
       s.kit.material = p.flags & CLASH_FLAG.hurt ? flash : (teamMats[p.team] ?? teamMats[0]!);
+      for (const g of s.gear) g.material = p.flags & CLASH_FLAG.hurt ? gearHurt : gear;
       s.shield.visible = !!(p.flags & CLASH_FLAG.shield);
       s.muzzle.visible = !!(p.flags & CLASH_FLAG.firing) && Math.floor(f.t / 45) % 2 === 0;
     }
