@@ -1161,6 +1161,44 @@ a.sg-btn {
 .clash-pts {
   color: #ffd36b;
 }
+/* A power-up you have running: its bar drains over its duration. */
+.clash-buff {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c);
+}
+.clash-buff i {
+  width: 40px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  overflow: hidden;
+}
+.clash-buff i::before {
+  content: "";
+  display: block;
+  height: 100%;
+  background: var(--c);
+  transform-origin: left;
+  animation: clash-buff-drain var(--ms) linear forwards;
+}
+@keyframes clash-buff-drain {
+  to {
+    transform: scaleX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clash-buff i::before {
+    animation: none;
+  }
+}
+.clash-help-items {
+  flex-basis: 100%;
+}
+.clash-help-items svg {
+  vertical-align: -2px;
+}
 .clash-full {
   position: absolute;
   right: var(--space-2);
@@ -1223,6 +1261,12 @@ a.sg-btn {
   }
   .clash-hp-bar {
     width: 64px;
+  }
+  .clash-buff-name {
+    display: none;
+  }
+  .clash-buff i {
+    width: 26px;
   }
 }
 

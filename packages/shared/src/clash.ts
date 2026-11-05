@@ -77,6 +77,19 @@ export const CLASH_RULES = {
     pointsPool: 300,
   },
 
+  /**
+   * Power-ups wait at fixed spots and come back a while after someone takes one. A medkit heals
+   * (and is left alone at full health), overdrive makes your shots hit harder, and haste makes
+   * you run faster.
+   */
+  pickup: {
+    radius: 24,
+    medkitHeal: 50,
+    overdrive: { ms: 10_000, damageMult: 1.5 },
+    haste: { ms: 8_000, speedMult: 1.35 },
+    respawnMs: { medkit: 15_000, overdrive: 35_000, haste: 20_000 },
+  },
+
   /** Team score for tagging a player on the other team. */
   eliminationPower: 1,
   eliminationPoints: 50,
@@ -149,6 +162,22 @@ export const CLASH_WALLS: readonly Cover[] = [
 ];
 
 export const CLASH_CENTER = { x: 1200, y: 700 } as const;
+
+export type ClashPickupKind = "medkit" | "overdrive" | "haste";
+
+/**
+ * Power-up spots. Medkits sit just out of each base, haste in the open lanes top and bottom, and
+ * the one overdrive in the middle of the plaza, worth fighting over.
+ */
+export const CLASH_PICKUPS: ReadonlyArray<{ kind: ClashPickupKind; x: number; y: number }> = [
+  { kind: "medkit", x: 600, y: 470 },
+  { kind: "medkit", x: 600, y: 930 },
+  { kind: "medkit", x: 1800, y: 470 },
+  { kind: "medkit", x: 1800, y: 930 },
+  { kind: "haste", x: 1200, y: 265 },
+  { kind: "haste", x: 1200, y: 1135 },
+  { kind: "overdrive", x: 1200, y: 700 },
+];
 
 /** Where drones appear, away from both bases. */
 export const CLASH_DRONE_SPAWNS = [
@@ -290,7 +319,7 @@ export const clashInputSchema = z
 export type ClashInput = z.infer<typeof clashInputSchema>;
 
 /** Bits in a player's snapshot flags. */
-export const CLASH_FLAG = { alive: 1, shield: 2, hurt: 4, firing: 8, dodge: 16 } as const;
+export const CLASH_FLAG = { alive: 1, shield: 2, hurt: 4, firing: 8, dodge: 16, overdrive: 32, haste: 64 } as const;
 
 /**
  * One player in a snapshot: number, x, y, aim (centiradians), health, flags, life, personal
@@ -320,6 +349,8 @@ export type ClashShotTuple = [
   t0: number,
   owner: number,
 ];
+/** A power-up taken this tick: the player's number and the spot's index in CLASH_PICKUPS. */
+export type ClashGrabTuple = [n: number, spot: number];
 /** Who knocked out what. by is a player number, or -1 for an NPC. what: 0 player, 1 drone, 2 Titan. */
 export type ClashFeedTuple = [by: number, what: 0 | 1 | 2, victim: number, team: number];
 
@@ -335,6 +366,13 @@ export interface ClashSnapshot {
   /** Shots that hit something or ran out of range. */
   gone: number[];
   feed: ClashFeedTuple[];
+  /**
+   * For each spot in CLASH_PICKUPS, tenths of a second until its power-up is back; 0 while it is
+   * waiting to be taken. Missing from servers that predate power-ups.
+   */
+  items?: number[];
+  /** Power-ups taken this tick. */
+  grabs?: ClashGrabTuple[];
 }
 
 export interface ClashPlayerStats {
@@ -345,6 +383,8 @@ export interface ClashPlayerStats {
   deaths: number;
   drones: number;
   titanDamage: number;
+  /** Power-ups taken. */
+  pickups?: number;
   points: number;
 }
 

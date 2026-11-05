@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLASH_FLAG, CLASH_RULES, type ClashSnapshot, type ClashView } from "@spotflow-games/shared";
+import {
+  CLASH_FLAG,
+  CLASH_PICKUPS,
+  CLASH_RULES,
+  pointInWall,
+  type ClashSnapshot,
+  type ClashView,
+} from "@spotflow-games/shared";
 import { GameError } from "../src/games/contract.js";
 import { createClashEngine } from "../src/games/clash/engine.js";
 import { decode, encode } from "../src/sessions/codec.js";
@@ -21,6 +28,8 @@ interface Fighter {
   life: number;
   shieldUntil: number;
   dodgeUntil?: number;
+  overdriveUntil?: number;
+  hasteUntil?: number;
   points: number;
   eliminations: number;
 }
@@ -212,6 +221,66 @@ describe("Core Clash", () => {
     input(room, a.userId, { f: false, a: 0 });
     vi.advanceTimersByTime(600);
     expect(b.hp).toBe(CLASH_RULES.playerHp - CLASH_RULES.shotDamage);
+  });
+
+  it("hands out power-ups to whoever reaches them, and brings them back later", async () => {
+    const { room, hooks } = makeRoom();
+    await room.start("host");
+    const { a, b } = duel(room);
+    const P = CLASH_RULES.pickup;
+    for (const spot of CLASH_PICKUPS) {
+      expect(pointInWall(spot.x, spot.y)).toBe(false);
+      expect(spot.x === 1200 || CLASH_PICKUPS.some((o) => o.x === 2400 - spot.x && o.y === spot.y)).toBe(true);
+    }
+    const spot = (kind: string) => CLASH_PICKUPS.findIndex((p) => p.kind === kind);
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).items).toEqual(CLASH_PICKUPS.map(() => 0));
+
+    // A medkit is left alone at full health, and heals when hurt.
+    const med = CLASH_PICKUPS[spot("medkit")]!;
+    Object.assign(a, { x: med.x, y: med.y });
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).items![spot("medkit")]).toBe(0);
+    a.hp = 30;
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    // Plus a moment of out-of-combat regen.
+    expect(Math.floor(a.hp)).toBe(30 + P.medkitHeal);
+    expect(lastSnap(hooks).grabs).toEqual([[a.n, spot("medkit")]]);
+    expect(lastSnap(hooks).items![spot("medkit")]).toBeGreaterThan(0);
+
+    // Overdrive makes shots hit harder.
+    const od = CLASH_PICKUPS[spot("overdrive")]!;
+    Object.assign(a, { x: od.x, y: od.y, hp: CLASH_RULES.playerHp });
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(lastSnap(hooks).players.find((p) => p[0] === a.n)![5] & CLASH_FLAG.overdrive).toBeTruthy();
+    Object.assign(b, { x: od.x + 200, y: od.y, shieldUntil: 0 });
+    input(room, a.userId, { f: true, a: 0 });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    input(room, a.userId, { f: false, a: 0 });
+    vi.advanceTimersByTime(400);
+    expect(b.hp).toBe(CLASH_RULES.playerHp - CLASH_RULES.shotDamage * P.overdrive.damageMult);
+    // It's gone for a while, then comes back.
+    expect(lastSnap(hooks).items![spot("overdrive")]).toBeGreaterThan(0);
+    Object.assign(a, { x: 1500, y: 850 });
+    room.inputs.delete(a.userId);
+    vi.advanceTimersByTime(P.respawnMs.overdrive);
+    expect(lastSnap(hooks).items![spot("overdrive")]).toBe(0);
+    expect(a.overdriveUntil! < Date.now()).toBe(true);
+
+    // Haste lets you move faster than normal top speed.
+    const hs = CLASH_PICKUPS[spot("haste")]!;
+    Object.assign(a, { x: hs.x, y: hs.y });
+    input(room, a.userId, {});
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(a.hasteUntil! > Date.now()).toBe(true);
+    const x0 = a.x;
+    input(room, a.userId, { x: a.x + 200, y: a.y });
+    vi.advanceTimersByTime(CLASH_RULES.tickMs);
+    expect(a.x - x0).toBeGreaterThan(CLASH_RULES.playerSpeed * 0.1 * 1.6 + 6);
+    expect(view(room, a.userId).players.find((p) => p.n === a.n)!.pickups).toBe(3);
   });
 
   it("ends when a team reaches the target and awards points and the win bonus once", async () => {

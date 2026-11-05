@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  BriefcaseMedical,
   Crosshair,
+  Flame,
   Footprints,
   Maximize2,
   Minimize2,
@@ -8,11 +10,13 @@ import {
   RotateCcw,
   Shield,
   Swords,
+  Wind,
   Zap,
 } from "lucide-react";
 import {
   CLASH_CENTER,
   CLASH_FLAG,
+  CLASH_PICKUPS,
   CLASH_RULES as R,
   CLASH_TEAMS,
   CLASH_WALLS,
@@ -22,6 +26,7 @@ import {
   resolveCircle,
   type ClashFeedTuple,
   type ClashNpcTuple,
+  type ClashPickupKind,
   type ClashPlayerTuple,
   type ClashShape,
   type ClashShotTuple,
@@ -111,7 +116,16 @@ interface Hud {
   points: number;
   feed: Array<{ key: number; text: string; mine: boolean; team: number }>;
   titan: { hp: number; maxHp: number } | null;
+  /** Power-ups you have running, timed from when you took them. */
+  buffs: Array<{ kind: "overdrive" | "haste"; key: number; ms: number }>;
 }
+
+/** How each power-up is named and coloured on the HUD, the minimap and in the world. */
+export const PICKUP_LOOK: Record<ClashPickupKind, { name: string; color: string }> = {
+  medkit: { name: "Medkit", color: "#3fd08b" },
+  overdrive: { name: "Overdrive", color: "#ff7a2e" },
+  haste: { name: "Haste", color: "#5ad8ff" },
+};
 
 const firstName = (name?: string) => name?.split(" ")[0] ?? "Someone";
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -146,6 +160,7 @@ export function ClashScreen({ session, game, meId }: Props) {
     points: 0,
     feed: [],
     titan: null,
+    buffs: [],
   });
   const [banner, setBanner] = useState<string | null>(null);
   const [announce, setAnnounce] = useState("");
@@ -168,6 +183,8 @@ export function ClashScreen({ session, game, meId }: Props) {
   const trail = useRef<{ t: number; x: number; y: number }[]>([]);
   const shots = useRef(new Map<number, Shot>());
   const particles = useRef<Particle[]>([]);
+  /** Tenths of a second until each power-up spot is back; 0 while it's there to take. */
+  const items = useRef<number[]>([]);
   const me = useRef({ x: 0, y: 0, life: -1, alive: false, hurtAt: 0, downAt: 0, driftSince: 0, flags: 0 });
   const controls = useRef({
     keys: new Set<string>(),
@@ -271,6 +288,39 @@ export function ClashScreen({ session, game, meId }: Props) {
         const shownTeam = team >= 0 ? team : (teams.current.get(victim) ?? 0);
         feed.push({ key: feedKey.current++, text: feedText(f, names.current), mine: mineFeed, team: shownTeam });
       }
+      // Power-ups taken, and the overdrive coming back.
+      const buffs: Hud["buffs"] = [];
+      for (const [n, i] of snap.grabs ?? []) {
+        const spot = CLASH_PICKUPS[i];
+        const at = people.get(n);
+        if (!spot) continue;
+        burst(particles.current, spot.x, spot.y, 30, 14, PICKUP_LOOK[spot.kind].color);
+        if (n === myN) {
+          playSound("correct", soundRef.current);
+          if (spot.kind === "medkit") setAnnounce(`Medkit: plus ${R.pickup.medkitHeal} health.`);
+          else {
+            const ms = R.pickup[spot.kind].ms;
+            buffs.push({ kind: spot.kind, key: feedKey.current++, ms });
+            setAnnounce(`${PICKUP_LOOK[spot.kind].name} for ${ms / 1000} seconds.`);
+          }
+        }
+        if (spot.kind === "overdrive" && at)
+          feed.push({
+            key: feedKey.current++,
+            text: `${names.current.get(n) ?? "Someone"} grabbed Overdrive`,
+            mine: n === myN,
+            team: teams.current.get(n) ?? 0,
+          });
+      }
+      if (snap.items) {
+        const od = CLASH_PICKUPS.findIndex((p) => p.kind === "overdrive");
+        if (items.current.length && items.current[od]! > 0 && snap.items[od] === 0) {
+          setBanner("Overdrive is back in the plaza!");
+          setAnnounce("Overdrive is back in the middle of the war zone.");
+        }
+        items.current = snap.items;
+      }
+
       const titan = snap.npcs.find((n) => n[1] === 1);
       const hadTitan =
         snaps.current.length > 1 && snaps.current[snaps.current.length - 2]!.npcs.some((n) => n[1] === 1);
@@ -287,6 +337,10 @@ export function ClashScreen({ session, game, meId }: Props) {
         points: mine ? mine[7] : h.points,
         feed: [...feed, ...h.feed].slice(0, 3),
         titan: titan ? { hp: titan[4], maxHp: titan[5] } : null,
+        // A newer grab of the same kind restarts its timer; a power-up ends with its flag.
+        buffs: [...buffs, ...h.buffs.filter((b) => !buffs.some((x) => x.kind === b.kind))].filter(
+          (b) => mine && mine[5] & CLASH_FLAG[b.kind],
+        ),
       }));
     };
     const socket = getSocket();
@@ -527,7 +581,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         m.x = p.x;
         m.y = p.y;
       } else if (alive && (fwd || side)) {
-        const step = R.playerSpeed * dt;
+        const step = R.playerSpeed * (m.flags & CLASH_FLAG.haste ? R.pickup.haste.speedMult : 1) * dt;
         const p = resolveCircle(
           m.x + (fx * fwd - fy * side) * step,
           m.y + (fy * fwd + fx * side) * step,
@@ -599,8 +653,12 @@ export function ClashScreen({ session, game, meId }: Props) {
       // Keep the angle small, as the server only takes angles within a few turns.
       if (Math.abs(c.yaw) > Math.PI * 2) c.yaw = Math.atan2(Math.sin(c.yaw), Math.cos(c.yaw));
 
-      // Shots move in straight lines, so each is drawn exactly where it is now.
+      // Shots move in straight lines, so each is drawn exactly where it is now. Overdriven shots glow hot.
       const shotList: ClashFrame["shots"] = [];
+      const hot = new Set<number>();
+      for (const p of world.players) if (p.flags & CLASH_FLAG.overdrive) hot.add(p.n);
+      if (m.flags & CLASH_FLAG.overdrive) hot.add(myN);
+      else hot.delete(myN);
       for (const [id, s] of shots.current) {
         const [, x0, y0, vx, vy, team, t0, owner] = s.t;
         const at = owner === myN ? now : rt;
@@ -614,7 +672,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         }
         if (at < t0) continue;
         const e = (at - t0) / 1000;
-        shotList.push({ id, x: x0 + vx * e, y: y0 + vy * e, vx, vy, team });
+        shotList.push({ id, x: x0 + vx * e, y: y0 + vy * e, vx, vy, team, hot: hot.has(owner) });
       }
 
       // The dodge meter fills as the roll recharges.
@@ -638,7 +696,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         .filter((p) => !(p.n === myN && playing))
         .map((p) => ({ n: p.n, x: p.x, y: p.y, a: p.a, team: teams.current.get(p.n) ?? 0, flags: p.flags }));
       if (alive) {
-        let flags = m.flags & CLASH_FLAG.shield;
+        let flags = m.flags & (CLASH_FLAG.shield | CLASH_FLAG.overdrive | CLASH_FLAG.haste);
         if (firing) flags |= CLASH_FLAG.firing;
         if (c.dash) flags |= CLASH_FLAG.dodge;
         if (performance.now() - m.hurtAt < 120) flags |= CLASH_FLAG.hurt;
@@ -652,6 +710,7 @@ export function ClashScreen({ session, game, meId }: Props) {
           : null,
         players,
         npcs: world.npcs,
+        pickups: CLASH_PICKUPS.map((p, i) => ({ ...p, ready: items.current.length > 0 && items.current[i] === 0 })),
         shots: shotList,
         teamColors: colors.team,
       });
@@ -729,6 +788,7 @@ export function ClashScreen({ session, game, meId }: Props) {
           .filter((p) => !playing || teams.current.get(p.n) === myTeam || spotted.has(p.n))
           .map((p) => ({ x: p.x, y: p.y, team: teams.current.get(p.n) ?? 0 })),
         npcs: world.npcs,
+        pickups: CLASH_PICKUPS.filter((_, i) => items.current.length > 0 && items.current[i] === 0),
         me: alive ? { x: m.x, y: m.y, yaw: c.yaw, team: myTeam } : null,
         still,
         t,
@@ -910,6 +970,22 @@ export function ClashScreen({ session, game, meId }: Props) {
                 <kbd>Shift</kbd>
               </span>
             )}
+            {hud.buffs.map((b) => (
+              <span
+                key={b.key}
+                className="clash-buff"
+                style={{ "--c": PICKUP_LOOK[b.kind].color, "--ms": `${b.ms}ms` } as React.CSSProperties}
+                aria-label={`${PICKUP_LOOK[b.kind].name} active`}
+              >
+                {b.kind === "overdrive" ? (
+                  <Flame aria-hidden="true" size={14} />
+                ) : (
+                  <Wind aria-hidden="true" size={14} />
+                )}
+                <span className="clash-buff-name">{PICKUP_LOOK[b.kind].name}</span>
+                <i aria-hidden="true" />
+              </span>
+            ))}
             <span className="sg-num clash-pts">{hud.points} pts</span>
           </div>
         )}
@@ -974,6 +1050,11 @@ export function ClashScreen({ session, game, meId }: Props) {
           Move with <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>. Turn with the mouse or <kbd>←</kbd>{" "}
           <kbd>→</kbd>. Click or hold to fire; <kbd>Space</kbd> fires with aim help; <kbd>Shift</kbd> rolls out of the
           way of shots. Teammates spot enemies on your minimap, and your base heals you.
+          <span className="clash-help-items">
+            Grab power-ups: <BriefcaseMedical aria-hidden="true" size={14} color={PICKUP_LOOK.medkit.color} /> medkits
+            heal, <Flame aria-hidden="true" size={14} color={PICKUP_LOOK.overdrive.color} /> overdrive in the plaza hits
+            harder, and <Wind aria-hidden="true" size={14} color={PICKUP_LOOK.haste.color} /> haste makes you faster.
+          </span>
         </p>
       )}
       <span className="visually-hidden" aria-live="polite">
@@ -1368,6 +1449,7 @@ function drawMinimap(
   d: {
     players: Array<{ x: number; y: number; team: number }>;
     npcs: WorldNpc[];
+    pickups: ReadonlyArray<{ kind: ClashPickupKind; x: number; y: number }>;
     me: { x: number; y: number; yaw: number; team: number } | null;
     still: boolean;
     t: number;
@@ -1403,6 +1485,21 @@ function drawMinimap(
   for (const cv of CLASH_WALLS) {
     ctx.fillStyle = cv.kind === "building" ? "#b8ad9a" : cv.kind === "sandbag" ? "#8f8063" : "#8a8478";
     ctx.fillRect(cv.x, cv.y, cv.w, cv.h);
+  }
+  // Power-ups waiting to be taken: small diamonds in their colour.
+  for (const p of d.pickups) {
+    const r = (p.kind === "overdrive" ? 5.5 : 4) / s;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y - r);
+    ctx.lineTo(p.x + r, p.y);
+    ctx.lineTo(p.x, p.y + r);
+    ctx.lineTo(p.x - r, p.y);
+    ctx.closePath();
+    ctx.fillStyle = PICKUP_LOOK[p.kind].color;
+    ctx.fill();
+    ctx.strokeStyle = "#0d0b1f";
+    ctx.lineWidth = 1.2 / s;
+    ctx.stroke();
   }
   for (const n of d.npcs) {
     ctx.fillStyle = n.kind === 1 ? "#ff3d6e" : "#e04dff";

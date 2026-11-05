@@ -3,6 +3,7 @@ import {
   CLASH_CENTER,
   CLASH_DRONE_SPAWNS,
   CLASH_FLAG,
+  CLASH_PICKUPS,
   CLASH_RULES as R,
   clashBases,
   clashInputSchema,
@@ -10,6 +11,7 @@ import {
   pointInWall,
   resolveCircle,
   type ClashFeedTuple,
+  type ClashGrabTuple,
   type ClashSnapshot,
   type ClashShotTuple,
   type ClashView,
@@ -51,6 +53,10 @@ interface Fighter {
   dodgeReadyAt?: number;
   /** Last dodge counter seen from the client. */
   lastD?: number;
+  /** Power-ups running until then. Missing on games saved before power-ups existed. */
+  overdriveUntil?: number;
+  hasteUntil?: number;
+  pickups?: number;
   eliminations: number;
   deaths: number;
   drones: number;
@@ -102,6 +108,8 @@ interface ClashState {
   shots: Shot[];
   power: number[];
   nextDroneAt: number;
+  /** For each spot in CLASH_PICKUPS, when its power-up is back; 0 while it is there to take. */
+  itemsAt?: number[];
   /** When the next Titan appears, or 0 while one is alive. */
   titanAt: number;
   outcome: ClashView["outcome"];
@@ -112,6 +120,7 @@ interface TickOut {
   shots: ClashShotTuple[];
   gone: number[];
   feed: ClashFeedTuple[];
+  grabs: ClashGrabTuple[];
   hurt: Set<string | number>;
 }
 
@@ -144,6 +153,9 @@ export function createClashEngine() {
     f.lastMoveAt = ctx.now();
     f.lastHurtAt = 0;
     f.dodgeUntil = 0;
+    // Power-ups are lost with the life they were taken in.
+    f.overdriveUntil = 0;
+    f.hasteUntil = 0;
   };
 
   const addFighter = (ctx: GameContext, state: ClashState, userId: string, team: number) => {
@@ -207,7 +219,7 @@ export function createClashEngine() {
       team: f.team,
       ownerId: f.userId,
       ownerN: f.n,
-      damage: R.shotDamage,
+      damage: now < (f.overdriveUntil ?? 0) ? R.shotDamage * R.pickup.overdrive.damageMult : R.shotDamage,
       rangeMs: (R.shotRange / R.shotSpeed) * 1000,
     });
   };
@@ -320,7 +332,10 @@ export function createClashEngine() {
       // roll is much faster, and its moves can arrive a little after it ends.
       if (input.l === f.life) {
         const rolling = now < (f.dodgeUntil ?? 0) + 2 * R.tickMs;
-        const speed = rolling ? (R.dodge.distance / R.dodge.ms) * 1000 : R.playerSpeed;
+        const hasted = now < (f.hasteUntil ?? 0) + 2 * R.tickMs;
+        const speed = rolling
+          ? (R.dodge.distance / R.dodge.ms) * 1000
+          : R.playerSpeed * (hasted ? R.pickup.haste.speedMult : 1);
         const allowed = speed * ((now - f.lastMoveAt) / 1000) * 1.6 + 6;
         let dx = input.x - f.x;
         let dy = input.y - f.y;
@@ -516,6 +531,35 @@ export function createClashEngine() {
     return npc;
   };
 
+  /** Power-ups go to whoever reaches them first, and come back after a while. */
+  const grabPickups = (ctx: GameContext, state: ClashState, out: TickOut) => {
+    const now = ctx.now();
+    const at = (state.itemsAt ??= CLASH_PICKUPS.map(() => 0));
+    CLASH_PICKUPS.forEach((spot, i) => {
+      if (at[i]! > now) return;
+      at[i] = 0;
+      let taker: Fighter | null = null;
+      let best = (R.playerRadius + R.pickup.radius) ** 2;
+      for (const f of state.fighters.values()) {
+        if (!f.alive) continue;
+        // Nobody wastes a medkit at full health.
+        if (spot.kind === "medkit" && f.hp >= R.playerHp) continue;
+        const d = dist2(f.x, f.y, spot.x, spot.y);
+        if (d <= best) {
+          taker = f;
+          best = d;
+        }
+      }
+      if (!taker) return;
+      if (spot.kind === "medkit") taker.hp = Math.min(R.playerHp, taker.hp + R.pickup.medkitHeal);
+      else if (spot.kind === "overdrive") taker.overdriveUntil = now + R.pickup.overdrive.ms;
+      else taker.hasteUntil = now + R.pickup.haste.ms;
+      taker.pickups = (taker.pickups ?? 0) + 1;
+      at[i] = now + R.pickup.respawnMs[spot.kind];
+      out.grabs.push([taker.n, i]);
+    });
+  };
+
   const heal = (ctx: GameContext, state: ClashState, dt: number) => {
     const now = ctx.now();
     const bases = clashBases(state.config.teams);
@@ -544,7 +588,9 @@ export function createClashEngine() {
           (f.alive && now < f.shieldUntil ? CLASH_FLAG.shield : 0) |
           (out.hurt.has(f.userId) ? CLASH_FLAG.hurt : 0) |
           (f.firing ? CLASH_FLAG.firing : 0) |
-          (f.alive && now < (f.dodgeUntil ?? 0) ? CLASH_FLAG.dodge : 0),
+          (f.alive && now < (f.dodgeUntil ?? 0) ? CLASH_FLAG.dodge : 0) |
+          (f.alive && now < (f.overdriveUntil ?? 0) ? CLASH_FLAG.overdrive : 0) |
+          (f.alive && now < (f.hasteUntil ?? 0) ? CLASH_FLAG.haste : 0),
         f.life,
         f.points,
         f.alive ? 0 : Math.max(0, Math.ceil((f.respawnAt - now) / 100)),
@@ -561,6 +607,8 @@ export function createClashEngine() {
       shots: out.shots,
       gone: out.gone,
       feed: out.feed,
+      items: (state.itemsAt ?? []).map((t) => (t > now ? Math.ceil((t - now) / 100) : 0)),
+      grabs: out.grabs,
     };
   };
 
@@ -569,13 +617,14 @@ export function createClashEngine() {
     // A late timer must not teleport everything, so cap the step.
     const dt = Math.min(0.25, Math.max(0, (now - state.lastTick) / 1000));
     state.lastTick = now;
-    const out: TickOut = { shots: [], gone: [], feed: [], hurt: new Set() };
+    const out: TickOut = { shots: [], gone: [], feed: [], grabs: [], hurt: new Set() };
 
     syncRoster(ctx, state);
     for (const f of state.fighters.values()) if (!f.alive && now >= f.respawnAt) respawn(ctx, state, f);
     applyInputs(ctx, state, out);
     moveShots(ctx, state, dt, out);
     runNpcs(ctx, state, dt, out);
+    grabPickups(ctx, state, out);
     heal(ctx, state, dt);
     spawnNpcs(ctx, state);
 
@@ -619,6 +668,7 @@ export function createClashEngine() {
         power: new Array<number>(teams).fill(0),
         nextDroneAt: now + 2000,
         titanAt: config.bots ? now + R.titan.firstSpawnMs : 0,
+        itemsAt: CLASH_PICKUPS.map(() => 0),
         outcome: null,
       };
       // Shuffle, then deal players round the teams so sizes differ by one at most.
@@ -686,6 +736,7 @@ export function createClashEngine() {
           deaths: f.deaths,
           drones: f.drones,
           titanDamage: Math.round(f.titanDamage),
+          pickups: f.pickups ?? 0,
           points: f.points,
         })),
         me: me ? { n: me.n, team: me.team } : null,
