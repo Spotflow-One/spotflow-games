@@ -1982,3 +1982,45 @@ a.sg-btn {
 .clash-sens input {
   width: 140px;
 }
+
+/* Loadouts and grenades. */
+.clash-nade.ready {
+  color: #9be15d;
+}
+.clash-nade i {
+  background: linear-gradient(90deg, #9be15d calc(var(--r, 1) * 100%), rgba(255, 255, 255, 0.16) 0);
+}
+.clash-weapon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.clash-weapon-next {
+  color: #ffd36b;
+  font-weight: 600;
+}
+.clash-roll.clash-grenade {
+  right: 214px;
+  bottom: 150px;
+  width: 54px;
+  height: 54px;
+  background:
+    radial-gradient(circle, rgba(11, 8, 32, 0.7) 58%, transparent 60%),
+    conic-gradient(#9be15d calc(var(--r, 1) * 360deg), rgba(255, 255, 255, 0.15) 0);
+}
+.clash-roll.clash-grenade.ready {
+  border-color: #9be15d;
+}
+.clash-swap {
+  position: absolute;
+  right: 108px;
+  bottom: 228px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background: rgba(11, 8, 32, 0.6);
+  color: #ffffff;
+  font: 700 12px/1 var(--font-body);
+  touch-action: none;
+}

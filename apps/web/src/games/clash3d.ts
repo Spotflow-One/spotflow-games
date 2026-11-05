@@ -46,7 +46,21 @@ export interface ClashFrame {
   /** Power-up spots; `ready` while there's one to take. */
   pickups: Array<{ kind: ClashPickupKind; x: number; y: number; ready: boolean }>;
   /** `hot` shots come from a soldier on overdrive. */
-  shots: Array<{ id: number; x: number; y: number; vx: number; vy: number; team: number; hot?: boolean }>;
+  /** `long` shots are sniper rounds. */
+  shots: Array<{
+    id: number;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    team: number;
+    hot?: boolean;
+    long?: boolean;
+  }>;
+  /** Grenades in the air or on the ground; z is the height. */
+  grenades: Array<{ id: number; x: number; y: number; z: number }>;
+  /** Blasts, with k running from 0 to 1 over their life. */
+  booms: Array<{ x: number; y: number; k: number }>;
   teamColors: string[];
 }
 
@@ -1152,6 +1166,18 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   };
   const hotMat = own(new THREE.MeshBasicMaterial({ color: "#ffb15a" }));
 
+  // Grenades: a small olive egg with a blinking light; blasts: a glowing fireball that swells and fades.
+  const grenadeGeo = own(
+    bake([
+      [sphere(6, 10, 8), "#4d5a2a", [0, 0, 0], [0, 0, 0], [1, 1.25, 1]],
+      [box(3, 4, 3), "#2b2b2b", [0, 8, 0]],
+    ]),
+  );
+  const grenadeMat = own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }));
+  const grenadePool: Array<{ mesh: THREE.Mesh; blink: THREE.Sprite }> = [];
+  const boomGeo = own(new THREE.SphereGeometry(1, 18, 12));
+  const boomPool: Array<{ ball: THREE.Mesh; mat: THREE.MeshBasicMaterial; flare: THREE.Sprite }> = [];
+
   let width = 1;
   let height = 1;
   let camDist = 1;
@@ -1384,9 +1410,58 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
           (mesh.material as THREE.MeshBasicMaterial).color.set(f.teamColors[s.team] ?? "#ffffff");
         }
       }
-      mesh.scale.set(1, s.hot ? 1.8 : 1, s.hot ? 1.8 : 1);
+      mesh.scale.set(s.long && s.team >= 0 ? 4 : 1, s.hot ? 1.8 : 1, s.hot ? 1.8 : 1);
     }
     for (let i = f.shots.length; i < shotPool.length; i++) shotPool[i]!.visible = false;
+
+    // Grenades.
+    for (const [i, g] of f.grenades.entries()) {
+      let p = grenadePool[i];
+      if (!p) {
+        const mesh = new THREE.Mesh(grenadeGeo, grenadeMat);
+        const blink = new THREE.Sprite(glow);
+        blink.scale.setScalar(18);
+        blink.position.y = 10;
+        mesh.add(blink);
+        scene.add(mesh);
+        p = { mesh, blink };
+        grenadePool.push(p);
+      }
+      p.mesh.visible = true;
+      p.mesh.position.set(g.x, g.z, g.y);
+      p.mesh.rotation.z = f.still ? 0 : f.t / 90 + g.id;
+      p.blink.visible = f.still || Math.floor(f.t / 120) % 2 === 0;
+    }
+    for (let i = f.grenades.length; i < grenadePool.length; i++) grenadePool[i]!.mesh.visible = false;
+
+    // Blasts.
+    for (const [i, b] of f.booms.entries()) {
+      let p = boomPool[i];
+      if (!p) {
+        const mat = own(
+          new THREE.MeshBasicMaterial({
+            color: "#ffb15a",
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          }),
+        );
+        const ball = new THREE.Mesh(boomGeo, mat);
+        const flare = new THREE.Sprite(glow);
+        scene.add(ball, flare);
+        p = { ball, mat, flare };
+        boomPool.push(p);
+      }
+      const r = R.grenade.blastRadius * (0.35 + 0.65 * Math.sqrt(b.k));
+      p.ball.visible = p.flare.visible = true;
+      p.ball.position.set(b.x, r * 0.35, b.y);
+      p.ball.scale.set(r, r * 0.7, r);
+      p.mat.opacity = 0.75 * (1 - b.k);
+      p.flare.position.set(b.x, 40, b.y);
+      p.flare.scale.setScalar(r * 2.6 * (1 - b.k * 0.5));
+    }
+    for (let i = f.booms.length; i < boomPool.length; i++)
+      boomPool[i]!.ball.visible = boomPool[i]!.flare.visible = false;
 
     renderer.render(scene, camera);
   };
