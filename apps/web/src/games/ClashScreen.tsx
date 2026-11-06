@@ -24,9 +24,9 @@ import {
   CLASH_PICKUPS,
   CLASH_RULES as R,
   CLASH_TEAMS,
-  CLASH_WALLS,
   CLASH_WEAPONS,
   clashBases,
+  clashWalls,
   clashWeaponOf,
   coverAlong,
   lineClear,
@@ -40,6 +40,7 @@ import {
   type ClashShotTuple,
   type ClashSnapshot,
   type ClashView,
+  type Cover,
   type SessionView,
 } from "@spotflow-games/shared";
 import { usePreferences } from "../lib/preferences";
@@ -193,6 +194,10 @@ export function ClashScreen({ session, game, meId }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const glRef = useRef<HTMLCanvasElement>(null);
   const worldRef = useRef<ClashWorld | null>(null);
+  // The cover of the scenery this match is fought in. It stays the same for the whole match.
+  const walls = clashWalls(game.scenery);
+  const wallsRef = useRef(walls);
+  wallsRef.current = walls;
   const dodgeRef = useRef<HTMLElement | null>(null);
   const [noGl, setNoGl] = useState(false);
   const touch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
@@ -316,7 +321,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         else m.driftSince ||= recv;
         if (mine[6] !== m.life || (off && recv - m.driftSince > SNAP_AFTER_MS)) {
           if (mine[6] !== m.life) {
-            // Fresh from the base: face the middle of the war zone.
+            // Fresh from the base: face the middle of the arena.
             controls.current.yaw = Math.atan2(CLASH_CENTER.y - mine[2], CLASH_CENTER.x - mine[1]);
           }
           m.x = mine[1];
@@ -411,7 +416,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         const od = CLASH_PICKUPS.findIndex((p) => p.kind === "overdrive");
         if (items.current.length && items.current[od]! > 0 && snap.items[od] === 0) {
           setBanner("Overdrive is back in the plaza!");
-          setAnnounce("Overdrive is back in the middle of the war zone.");
+          setAnnounce("Overdrive is back in the middle of the arena.");
         }
         items.current = snap.items;
       }
@@ -421,7 +426,7 @@ export function ClashScreen({ session, game, meId }: Props) {
         snaps.current.length > 1 && snaps.current[snaps.current.length - 2]!.npcs.some((n) => n[1] === 1);
       if (titan && !hadTitan) {
         setBanner("The Titan has awakened in the plaza!");
-        setAnnounce("The Titan has awakened in the middle of the war zone.");
+        setAnnounce("The Titan has awakened in the middle of the arena.");
       }
 
       setHud((h) => ({
@@ -541,7 +546,7 @@ export function ClashScreen({ session, game, meId }: Props) {
     import("./clash3d")
       .then((m) => {
         if (!alive || !glRef.current) return;
-        made = m.createClashWorld(glRef.current);
+        made = m.createClashWorld(glRef.current, game.scenery ?? "warzone");
         worldRef.current = made;
       })
       .catch(() => alive && setNoGl(true));
@@ -665,7 +670,7 @@ export function ClashScreen({ session, game, meId }: Props) {
       // Everyone else, a little in the past. The delay eases toward its target so time never jumps.
       interpMs += (interpTarget(arrivals.current) - interpMs) * Math.min(1, dt * 2);
       const rt = now - interpMs;
-      const world = interpolate(snaps.current, rt);
+      const world = interpolate(snaps.current, rt, wallsRef.current);
 
       // Turn and move, relative to the way you face.
       const k = c.keys;
@@ -740,7 +745,7 @@ export function ClashScreen({ session, game, meId }: Props) {
       }
       if (c.dash) {
         const step = (R.dodge.distance / R.dodge.ms) * 1000 * dt;
-        const p = resolveCircle(m.x + c.dash.dx * step, m.y + c.dash.dy * step, R.playerRadius);
+        const p = resolveCircle(m.x + c.dash.dx * step, m.y + c.dash.dy * step, R.playerRadius, wallsRef.current);
         m.x = p.x;
         m.y = p.y;
       } else if (alive && (fwd || side)) {
@@ -754,6 +759,7 @@ export function ClashScreen({ session, game, meId }: Props) {
           m.x + (fx * fwd - fy * side) * step,
           m.y + (fy * fwd + fx * side) * step,
           R.playerRadius,
+          wallsRef.current,
         );
         m.x = p.x;
         m.y = p.y;
@@ -774,13 +780,15 @@ export function ClashScreen({ session, game, meId }: Props) {
         for (const p of world.players) {
           if (!playing || teams.current.get(p.n) === myTeam) continue;
           const d = Math.hypot(p.x - m.x, p.y - m.y);
-          if (alive && d < SPOT_RANGE && lineClear(m.x, m.y, p.x, p.y)) inSight.add(p.n);
+          if (alive && d < SPOT_RANGE && lineClear(m.x, m.y, p.x, p.y, wallsRef.current)) inSight.add(p.n);
           if (
             inSight.has(p.n) ||
             // A crouching enemy moves quietly enough not to be heard.
             (alive && d < HEAR_RANGE && !(p.flags & CLASH_FLAG.crouch)) ||
             p.flags & CLASH_FLAG.firing ||
-            mates.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < SPOT_RANGE && lineClear(q.x, q.y, p.x, p.y))
+            mates.some(
+              (q) => Math.hypot(p.x - q.x, p.y - q.y) < SPOT_RANGE && lineClear(q.x, q.y, p.x, p.y, wallsRef.current),
+            )
           )
             spotted.add(p.n);
         }
@@ -790,7 +798,7 @@ export function ClashScreen({ session, game, meId }: Props) {
       const trigger = c.mouseDown || c.spaceDown || c.fireBtn;
       const wide = c.spaceDown || c.fireBtn || touch;
       const target = alive
-        ? assistTarget(world, m, c.yaw, wide ? ASSIST_WIDE : ASSIST_NARROW, myTeam, teams.current)
+        ? assistTarget(world, m, c.yaw, wide ? ASSIST_WIDE : ASSIST_NARROW, myTeam, teams.current, wallsRef.current)
         : null;
       // On a phone, holding fire also turns you gently onto the target.
       if (target && c.fireBtn) c.yaw = lerpAngle(c.yaw, target.a, Math.min(1, dt * 5));
@@ -966,7 +974,7 @@ export function ClashScreen({ session, game, meId }: Props) {
 
       // Crosshair where a shot would land, and brackets on a target the aim help has picked.
       if (alive) {
-        const reach = weapon.range * Math.min(1, rayFraction(m.x, m.y, c.yaw, weapon.range));
+        const reach = weapon.range * Math.min(1, rayFraction(m.x, m.y, c.yaw, weapon.range, wallsRef.current));
         const at = w3.project(m.x + fx * reach, m.y + fy * reach, SHOT_HEIGHT);
         if (at) drawCrosshair(ctx, at.x, at.y, !!target, t - c.lastLocalShot < 80);
         if (target) {
@@ -997,7 +1005,7 @@ export function ClashScreen({ session, game, meId }: Props) {
       const mh = (mw * H) / W;
       const mx0 = touch || view.w < 720 ? 8 : view.w - mw - 10;
       const my0 = touch || view.w < 720 ? (view.w < 720 ? 66 : 52) : view.h - mh - 10;
-      drawMinimap(ctx, colors, mx0, my0, mw, {
+      drawMinimap(ctx, colors, mx0, my0, mw, wallsRef.current, {
         players: world.players
           .filter((p) => !(p.n === myN && playing))
           .filter((p) => !playing || teams.current.get(p.n) === myTeam || spotted.has(p.n))
@@ -1161,7 +1169,7 @@ export function ClashScreen({ session, game, meId }: Props) {
           className={`clash-canvas clash-overlay${locked ? " locked" : ""}`}
           tabIndex={0}
           role="img"
-          aria-label={`Core Clash war zone. ${hud.power
+          aria-label={`Core Clash arena. ${hud.power
             .map((p, i) => `${CLASH_TEAMS[i]!.name} ${p} of ${game.target}`)
             .join(", ")}.`}
         />
@@ -1636,7 +1644,11 @@ function interpTarget(arrivals: number[]) {
 }
 
 /** Blends the two snapshots around render time, or carries soldiers on past the newest one. */
-function interpolate(snaps: ClashSnapshot[], rt: number): { players: WorldPlayer[]; npcs: WorldNpc[] } {
+function interpolate(
+  snaps: ClashSnapshot[],
+  rt: number,
+  walls: readonly Cover[],
+): { players: WorldPlayer[]; npcs: WorldNpc[] } {
   if (!snaps.length) return { players: [], npcs: [] };
   const newest = snaps[snaps.length - 1]!;
   if (rt > newest.now && snaps.length > 1) {
@@ -1652,7 +1664,8 @@ function interpolate(snaps: ClashSnapshot[], rt: number): { players: WorldPlayer
       const moving = q && q[6] === p[6] && q[5] & CLASH_FLAG.alive;
       const vx = moving ? (p[1] - q[1]) / span : 0;
       const vy = moving ? (p[2] - q[2]) / span : 0;
-      const at = vx || vy ? resolveCircle(p[1] + vx * ahead, p[2] + vy * ahead, R.playerRadius) : { x: p[1], y: p[2] };
+      const at =
+        vx || vy ? resolveCircle(p[1] + vx * ahead, p[2] + vy * ahead, R.playerRadius, walls) : { x: p[1], y: p[2] };
       players.push({ n: p[0], x: at.x, y: at.y, a: p[3] / 100, hp: p[4], flags: p[5] });
     }
     return { players, npcs: newest.npcs.map(npcOf) };
@@ -1705,6 +1718,7 @@ function assistTarget(
   cone: number,
   team: number,
   teams: Map<number, number>,
+  walls: readonly Cover[],
 ) {
   let best: { x: number; y: number; a: number } | null = null;
   let bestD = cone;
@@ -1713,7 +1727,7 @@ function assistTarget(
     if (dist > R.shotRange || dist < 1) return;
     const a = Math.atan2(y - me.y, x - me.x);
     const d = Math.abs(angleDiff(yaw, a));
-    if (d >= bestD || !lineClear(me.x, me.y, x, y)) return;
+    if (d >= bestD || !lineClear(me.x, me.y, x, y, walls)) return;
     bestD = d;
     best = { x, y, a };
   };
@@ -1723,7 +1737,7 @@ function assistTarget(
 }
 
 /** How far a shot from a point at an angle gets before it hits cover or the edge, as a fraction of `range`. */
-function rayFraction(x: number, y: number, a: number, range: number) {
+function rayFraction(x: number, y: number, a: number, range: number, walls: readonly Cover[]) {
   const dx = Math.cos(a) * range;
   const dy = Math.sin(a) * range;
   let edge = 1;
@@ -1731,7 +1745,7 @@ function rayFraction(x: number, y: number, a: number, range: number) {
   if (dx < 0) edge = Math.min(edge, -x / dx);
   if (dy > 0) edge = Math.min(edge, (H - y) / dy);
   if (dy < 0) edge = Math.min(edge, -y / dy);
-  return Math.min(edge, coverAlong(x, y, x + dx, y + dy));
+  return Math.min(edge, coverAlong(x, y, x + dx, y + dy, { walls }));
 }
 
 function burst(ps: Particle[], x: number, y: number, z: number, count: number, color: string) {
@@ -1867,12 +1881,30 @@ function drawBrackets(ctx: CanvasRenderingContext2D, x: number, y: number, r: nu
   ctx.stroke();
 }
 
+/** How each kind of cover shows on the minimap. Trees show their crowns. */
+const MINIMAP_COVER: Record<Cover["kind"], string> = {
+  building: "#b8ad9a",
+  cabin: "#a68866",
+  hall: "#a9adb5",
+  wall: "#8a8478",
+  container: "#8a8478",
+  crate: "#8a8478",
+  machine: "#8c9198",
+  tank: "#b9bec6",
+  sandbag: "#8f8063",
+  log: "#7a5e40",
+  pipe: "#7d8288",
+  rock: "#8d8f88",
+  tree: "rgba(70, 120, 70, 0.75)",
+};
+
 function drawMinimap(
   ctx: CanvasRenderingContext2D,
   c: Colors,
   x0: number,
   y0: number,
   w: number,
+  walls: readonly Cover[],
   d: {
     players: Array<{ x: number; y: number; team: number }>;
     npcs: WorldNpc[];
@@ -1909,9 +1941,13 @@ function drawMinimap(
     ctx.fill();
     ctx.globalAlpha = 1;
   });
-  for (const cv of CLASH_WALLS) {
-    ctx.fillStyle = cv.kind === "building" ? "#b8ad9a" : cv.kind === "sandbag" ? "#8f8063" : "#8a8478";
-    ctx.fillRect(cv.x, cv.y, cv.w, cv.h);
+  for (const cv of walls) {
+    ctx.fillStyle = MINIMAP_COVER[cv.kind];
+    if (cv.kind === "tree" || cv.kind === "tank") {
+      ctx.beginPath();
+      ctx.arc(cv.x + cv.w / 2, cv.y + cv.h / 2, (cv.kind === "tree" ? 0.8 : 0.5) * cv.w, 0, Math.PI * 2);
+      ctx.fill();
+    } else ctx.fillRect(cv.x, cv.y, cv.w, cv.h);
   }
   // Power-ups waiting to be taken: small diamonds in their colour.
   for (const p of d.pickups) {

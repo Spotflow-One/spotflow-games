@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CLASH_FLAG,
+  CLASH_CENTER,
+  CLASH_DRONE_SPAWNS,
   CLASH_PICKUPS,
   CLASH_RULES,
+  CLASH_SCENERIES,
+  clashBases,
+  clashWalls,
+  resolveCircle,
   CLASH_WEAPONS,
   clashWeaponOf,
   pointInWall,
@@ -495,5 +501,88 @@ describe("Core Clash", () => {
     expect(state(copy).fighters.size).toBe(PLAYERS.length);
     expect(lastSnap(hooks).npcs.length).toBeGreaterThan(0);
     copy.dispose();
+  });
+
+  describe.each(CLASH_SCENERIES.map((sc) => sc.id))("the %s scenery", (scenery) => {
+    const walls = clashWalls(scenery);
+    const clearOf = (x: number, y: number, r: number) =>
+      walls.every((w) => {
+        const cx = Math.max(w.x, Math.min(x, w.x + w.w));
+        const cy = Math.max(w.y, Math.min(y, w.y + w.h));
+        return (x - cx) ** 2 + (y - cy) ** 2 >= r * r;
+      });
+
+    it("is fair to both teams", () => {
+      for (const w of walls)
+        expect(walls.some((o) => o.kind === w.kind && o.x === 2400 - w.x - w.w && o.y === w.y && o.w === w.w)).toBe(
+          true,
+        );
+    });
+
+    it("leaves bases, power-ups and drone spawns open", () => {
+      for (const b of clashBases()) expect(clearOf(b.x, b.y, CLASH_RULES.baseRadius)).toBe(true);
+      for (const p of CLASH_PICKUPS) expect(clearOf(p.x, p.y, CLASH_RULES.pickup.radius + 10)).toBe(true);
+      for (const p of CLASH_DRONE_SPAWNS) expect(clearOf(p.x, p.y, CLASH_RULES.drone.radius + 10)).toBe(true);
+      // The Titan's plaza: a little leeway, as it is only pushed out of cover.
+      if (scenery !== "warzone")
+        expect(clearOf(CLASH_CENTER.x, CLASH_CENTER.y, CLASH_RULES.titan.leash + CLASH_RULES.titan.radius)).toBe(true);
+    });
+
+    it("lets a soldier walk from either base to every power-up", () => {
+      const step = 10;
+      const r = CLASH_RULES.playerRadius;
+      const cols = CLASH_RULES.arena.width / step;
+      const rows = CLASH_RULES.arena.height / step;
+      const open = (i: number, j: number) => {
+        const x = i * step + step / 2;
+        const y = j * step + step / 2;
+        return x >= r && y >= r && x <= 2400 - r && y <= 1400 - r && clearOf(x, y, r);
+      };
+      const seen = new Uint8Array(cols * rows);
+      const start = clashBases()[0]!;
+      const queue = [[Math.floor(start.x / step), Math.floor(start.y / step)] as const];
+      seen[queue[0]![1] * cols + queue[0]![0]] = 1;
+      while (queue.length) {
+        const [i, j] = queue.pop()!;
+        for (const [di, dj] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ] as const) {
+          const a = i + di;
+          const b = j + dj;
+          if (a < 0 || b < 0 || a >= cols || b >= rows || seen[b * cols + a] || !open(a, b)) continue;
+          seen[b * cols + a] = 1;
+          queue.push([a, b]);
+        }
+      }
+      const reached = (x: number, y: number) => seen[Math.floor(y / step) * cols + Math.floor(x / step)] === 1;
+      for (const p of [...CLASH_PICKUPS, ...clashBases()]) expect(reached(p.x, p.y)).toBe(true);
+    });
+
+    it("is played with its own cover", async () => {
+      const { room } = makeRoom({ scenery });
+      await room.start("host");
+      expect(view(room, "ada").scenery).toBe(scenery);
+      const ada = state(room).fighters.get("ada")!;
+      // Walking into the first block of cover stops at its edge.
+      const w = walls[0]!;
+      Object.assign(ada, { x: w.x - 40, y: w.y + w.h / 2 });
+      for (let i = 0; i < 6; i++) {
+        input(room, "ada", { x: ada.x + 20, y: ada.y });
+        vi.advanceTimersByTime(CLASH_RULES.tickMs);
+      }
+      expect(ada.x).toBeCloseTo(w.x - CLASH_RULES.playerRadius, 0);
+      expect(resolveCircle(ada.x, ada.y, CLASH_RULES.playerRadius, walls)).toEqual({ x: ada.x, y: ada.y });
+    });
+  });
+
+  it("fights in the war zone unless the host picks another scenery", async () => {
+    const { room } = makeRoom();
+    await room.start("host");
+    expect(view(room, "ada").scenery).toBe("warzone");
+    const bad = makeRoom({ scenery: "moon" });
+    await expect(bad.room.start("host")).rejects.toThrow("Those game settings aren't valid");
   });
 });

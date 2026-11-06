@@ -8,6 +8,7 @@ import {
   CLASH_WEAPONS,
   CLASH_RULES as R,
   clashBases,
+  clashWalls,
   clashInputSchema,
   coverAlong,
   lineClear,
@@ -20,6 +21,7 @@ import {
   type ClashGrenadeTuple,
   type ClashSnapshot,
   type ClashShotTuple,
+  type ClashScenery,
   type ClashView,
 } from "@spotflow-games/shared";
 import { GameError, type GameContext, type GameEngine } from "../contract.js";
@@ -29,6 +31,8 @@ export interface ClashConfig {
   teams: number;
   /** Drones and the Titan join the fight. */
   bots: boolean;
+  /** Where the match is fought. Missing from games saved before sceneries: the war zone. */
+  scenery?: ClashScenery;
   target: number;
   minutes: number;
 }
@@ -146,6 +150,9 @@ const SUBSTEPS = 4;
 const round = (v: number) => Math.round(v);
 const dist2 = (ax: number, ay: number, bx: number, by: number) => (ax - bx) ** 2 + (ay - by) ** 2;
 
+/** The cover of the scenery a match is fought in. */
+const wallsOf = (state: ClashState) => clashWalls(state.config.scenery);
+
 export function createClashEngine() {
   const teamSizes = (state: ClashState) => {
     const sizes = new Array<number>(state.config.teams).fill(0);
@@ -157,7 +164,7 @@ export function createClashEngine() {
     const base = clashBases(state.config.teams)[team]!;
     const angle = (randomInt(360) * Math.PI) / 180;
     const r = randomInt(70);
-    return resolveCircle(base.x + Math.cos(angle) * r, base.y + Math.sin(angle) * r, R.playerRadius);
+    return resolveCircle(base.x + Math.cos(angle) * r, base.y + Math.sin(angle) * r, R.playerRadius, wallsOf(state));
   };
 
   const respawn = (ctx: GameContext, state: ClashState, f: Fighter) => {
@@ -230,7 +237,7 @@ export function createClashEngine() {
     const start = R.playerRadius + 4;
     const x = f.x + Math.cos(f.a) * start;
     const y = f.y + Math.sin(f.a) * start;
-    if (pointInWall(x, y)) return;
+    if (pointInWall(x, y, wallsOf(state))) return;
     const w = weaponOf(f);
     const damage = now < (f.overdriveUntil ?? 0) ? w.damage * R.pickup.overdrive.damageMult : w.damage;
     for (let i = 0; i < w.pellets; i++) {
@@ -257,7 +264,7 @@ export function createClashEngine() {
     const G = R.grenade;
     const tx = f.x + Math.cos(f.a) * G.throwRange;
     const ty = f.y + Math.sin(f.a) * G.throwRange;
-    const reach = coverAlong(f.x, f.y, tx, ty, { pad: 6 });
+    const reach = coverAlong(f.x, f.y, tx, ty, { pad: 6, walls: wallsOf(state) });
     const pad = 8;
     const x = Math.max(pad, Math.min(R.arena.width - pad, f.x + (tx - f.x) * reach));
     const y = Math.max(pad, Math.min(R.arena.height - pad, f.y + (ty - f.y) * reach));
@@ -280,9 +287,10 @@ export function createClashEngine() {
       }
       out.booms.push([g.id, round(g.x), round(g.y), g.team]);
       const owner = state.fighters.get(g.ownerId) ?? null;
+      const walls = wallsOf(state);
       const damageAt = (x: number, y: number, r: number) => {
         const d = Math.max(0, Math.hypot(x - g.x, y - g.y) - r);
-        if (d > G.blastRadius || !lineClear(g.x, g.y, x, y)) return 0;
+        if (d > G.blastRadius || !lineClear(g.x, g.y, x, y, walls)) return 0;
         return Math.round(G.maxDamage - (G.maxDamage - G.minDamage) * (d / G.blastRadius));
       };
       for (const f of state.fighters.values()) {
@@ -436,7 +444,7 @@ export function createClashEngine() {
           dx = (dx / d) * allowed;
           dy = (dy / d) * allowed;
         }
-        const p = resolveCircle(f.x + dx, f.y + dy, R.playerRadius);
+        const p = resolveCircle(f.x + dx, f.y + dy, R.playerRadius, wallsOf(state));
         f.x = p.x;
         f.y = p.y;
       }
@@ -452,13 +460,14 @@ export function createClashEngine() {
   const moveShots = (ctx: GameContext, state: ClashState, dt: number, out: TickOut) => {
     const now = ctx.now();
     const kept: Shot[] = [];
+    const walls = wallsOf(state);
     shots: for (const s of state.shots) {
       // Fast shots take more, smaller steps, so they can't skip over anyone.
       const steps = Math.max(SUBSTEPS, Math.ceil((Math.hypot(s.vx, s.vy) * dt) / 40));
       for (let i = 0; i < steps; i++) {
         s.x += (s.vx * dt) / steps;
         s.y += (s.vy * dt) / steps;
-        if (pointInWall(s.x, s.y) || s.x < 0 || s.y < 0 || s.x > R.arena.width || s.y > R.arena.height) {
+        if (pointInWall(s.x, s.y, walls) || s.x < 0 || s.y < 0 || s.x > R.arena.width || s.y > R.arena.height) {
           out.gone.push(s.id);
           continue shots;
         }
@@ -521,7 +530,12 @@ export function createClashEngine() {
       const d = Math.hypot(tx - npc.x, ty - npc.y);
       if (d > 2) {
         const step = Math.min(d, speed * dt);
-        const p = resolveCircle(npc.x + ((tx - npc.x) / d) * step, npc.y + ((ty - npc.y) / d) * step, radius);
+        const p = resolveCircle(
+          npc.x + ((tx - npc.x) / d) * step,
+          npc.y + ((ty - npc.y) / d) * step,
+          radius,
+          wallsOf(state),
+        );
         npc.x = p.x;
         npc.y = p.y;
       } else if (!target && !titan) {
@@ -824,6 +838,7 @@ export function createClashEngine() {
       return {
         teamCount: state.config.teams,
         bots: state.config.bots,
+        scenery: state.config.scenery ?? "warzone",
         target: state.config.target,
         durationSec: state.config.minutes * 60,
         endsAt: state.endsAt,

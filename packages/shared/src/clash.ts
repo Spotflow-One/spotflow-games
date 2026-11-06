@@ -186,7 +186,22 @@ export const CLASH_TEAMS = [
 ] as const;
 export type ClashShape = (typeof CLASH_TEAMS)[number]["shape"];
 
-export type CoverKind = "building" | "wall" | "container" | "crate" | "sandbag";
+export type CoverKind =
+  | "building"
+  | "wall"
+  | "container"
+  | "crate"
+  | "sandbag"
+  // Forest
+  | "tree"
+  | "rock"
+  | "log"
+  | "cabin"
+  // Factory
+  | "hall"
+  | "tank"
+  | "machine"
+  | "pipe";
 
 export interface Rect {
   x: number;
@@ -201,7 +216,21 @@ export interface Cover extends Rect {
   height: number;
 }
 
-const COVER_HEIGHT: Record<CoverKind, number> = { building: 170, wall: 90, container: 75, crate: 45, sandbag: 40 };
+const COVER_HEIGHT: Record<CoverKind, number> = {
+  building: 170,
+  wall: 90,
+  container: 75,
+  crate: 45,
+  sandbag: 40,
+  tree: 260,
+  rock: 60,
+  log: 36,
+  cabin: 140,
+  hall: 165,
+  tank: 190,
+  machine: 80,
+  pipe: 44,
+};
 const cover = (kind: CoverKind, x: number, y: number, w: number, h: number, height = COVER_HEIGHT[kind]): Cover => ({
   kind,
   x,
@@ -236,6 +265,92 @@ export const CLASH_WALLS: readonly Cover[] = [
   cover("sandbag", 1140, 330, 120, 30),
   cover("sandbag", 1140, 1040, 120, 30),
 ];
+
+/**
+ * Builds a whole layout from its top-left quarter, mirrored top to bottom and then left to right,
+ * plus pieces that sit on the middle lines (given once, left of or across the centre line, and
+ * mirrored only where that makes a copy).
+ */
+function mirrored(quarter: Cover[], middle: Cover[]): Cover[] {
+  const half = [...quarter, ...quarter.map((c) => ({ ...c, y: 1400 - c.y - c.h }))];
+  const leftHalf = [...half, ...middle.filter((c) => c.x + c.w <= 1200)];
+  const across = middle.filter((c) => c.x + c.w > 1200);
+  return [...leftHalf, ...leftHalf.map((c) => ({ ...c, x: 2400 - c.x - c.w })), ...across];
+}
+
+/**
+ * A pine forest: thick trunks to hide behind, boulders, fallen logs and two log cabins on each
+ * side, with a stone clearing in the middle.
+ */
+const FOREST_WALLS: readonly Cover[] = mirrored(
+  [
+    cover("cabin", 470, 150, 220, 190),
+    cover("tree", 320, 200, 40, 40),
+    cover("tree", 770, 160, 40, 40),
+    cover("tree", 450, 500, 40, 40),
+    cover("tree", 720, 560, 40, 40),
+    cover("tree", 1010, 300, 40, 40),
+    cover("tree", 230, 420, 40, 40),
+    cover("tree", 880, 380, 36, 36),
+    cover("rock", 860, 140, 80, 60),
+    cover("log", 240, 320, 130, 28),
+  ],
+  [
+    cover("rock", 350, 650, 60, 100),
+    cover("log", 630, 640, 30, 120),
+    cover("rock", 820, 610, 70, 180),
+    cover("cabin", 1120, 1220, 160, 130, 120),
+    cover("log", 1140, 330, 120, 28),
+    cover("log", 1140, 1042, 120, 28),
+    cover("tree", 1180, 140, 40, 40),
+    cover("tree", 1060, 70, 40, 40),
+  ],
+);
+
+/**
+ * A factory floor: two halls at each end, silos, machines, a pipeline, stacked containers and
+ * pallets, with a loading bay in the middle.
+ */
+const FACTORY_WALLS: readonly Cover[] = mirrored(
+  [
+    cover("hall", 470, 140, 250, 220),
+    cover("tank", 860, 140, 90, 90),
+    cover("machine", 320, 520, 100, 70),
+    cover("pipe", 240, 320, 150, 26),
+    cover("crate", 980, 380, 50, 50),
+    cover("crate", 760, 450, 50, 50),
+    cover("wall", 900, 280, 160, 30),
+  ],
+  [
+    cover("container", 820, 600, 60, 200),
+    cover("pipe", 610, 620, 30, 160),
+    cover("hall", 1100, 40, 200, 150, 150),
+    cover("hall", 1100, 1210, 200, 150, 150),
+    cover("pipe", 1130, 340, 140, 26),
+    cover("pipe", 1130, 1034, 140, 26),
+  ],
+);
+
+export type ClashScenery = "warzone" | "forest" | "factory";
+
+/** The places a match can be fought in, picked by the host. Each has its own cover. */
+export const CLASH_SCENERIES: ReadonlyArray<{ id: ClashScenery; name: string; blurb: string }> = [
+  { id: "warzone", name: "War zone", blurb: "Ruined buildings, containers and sandbags at sunset" },
+  { id: "forest", name: "Forest", blurb: "Tall pines, boulders, fallen logs and log cabins" },
+  { id: "factory", name: "Factory", blurb: "Halls, silos, machines and pipes on a factory floor" },
+];
+export const CLASH_SCENERY_IDS = ["warzone", "forest", "factory"] as const satisfies readonly ClashScenery[];
+
+const WALLS_BY_SCENERY: Record<ClashScenery, readonly Cover[]> = {
+  warzone: CLASH_WALLS,
+  forest: FOREST_WALLS,
+  factory: FACTORY_WALLS,
+};
+
+/** The cover blocks of a scenery. Unknown or missing sceneries are the war zone. */
+export function clashWalls(scenery?: ClashScenery | string | null): readonly Cover[] {
+  return scenery && Object.hasOwn(WALLS_BY_SCENERY, scenery) ? WALLS_BY_SCENERY[scenery as ClashScenery] : CLASH_WALLS;
+}
 
 export const CLASH_CENTER = { x: 1200, y: 700 } as const;
 
@@ -273,8 +388,8 @@ export function clashBases(_teams = 2): Array<{ x: number; y: number }> {
   ];
 }
 
-export function pointInWall(x: number, y: number): boolean {
-  for (const w of CLASH_WALLS) if (x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
+export function pointInWall(x: number, y: number, walls: readonly Cover[] = CLASH_WALLS): boolean {
+  for (const w of walls) if (x >= w.x && x <= w.x + w.w && y >= w.y && y <= w.y + w.h) return true;
   return false;
 }
 
@@ -288,13 +403,13 @@ export function coverAlong(
   y1: number,
   x2: number,
   y2: number,
-  opts: { pad?: number; minHeight?: number } = {},
+  opts: { pad?: number; minHeight?: number; walls?: readonly Cover[] } = {},
 ): number {
   const pad = opts.pad ?? 0;
   const dx = x2 - x1;
   const dy = y2 - y1;
   let best = 1;
-  for (const w of CLASH_WALLS) {
+  for (const w of opts.walls ?? CLASH_WALLS) {
     if (opts.minHeight && w.height < opts.minHeight) continue;
     // Slab test of the segment against the block.
     let t0 = 0;
@@ -320,18 +435,29 @@ export function coverAlong(
 }
 
 /** Whether a straight line between two points crosses no cover, for line of sight. */
-export function lineClear(x1: number, y1: number, x2: number, y2: number): boolean {
-  return coverAlong(x1, y1, x2, y2) >= 1;
+export function lineClear(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  walls: readonly Cover[] = CLASH_WALLS,
+): boolean {
+  return coverAlong(x1, y1, x2, y2, { walls }) >= 1;
 }
 
 /**
  * Keeps a circle inside the arena and out of the cover blocks by pushing it out along the
  * shortest way. The server and the client both use this, so predicted movement matches.
  */
-export function resolveCircle(x: number, y: number, r: number): { x: number; y: number } {
+export function resolveCircle(
+  x: number,
+  y: number,
+  r: number,
+  walls: readonly Cover[] = CLASH_WALLS,
+): { x: number; y: number } {
   const { width, height } = CLASH_RULES.arena;
   for (let pass = 0; pass < 2; pass++) {
-    for (const w of CLASH_WALLS) {
+    for (const w of walls) {
       const cx = Math.max(w.x, Math.min(x, w.x + w.w));
       const cy = Math.max(w.y, Math.min(y, w.y + w.h));
       const dx = x - cx;
@@ -366,6 +492,8 @@ export const clashSessionConfigSchema = z
     minutes: z.number().int().min(2).max(10).default(CLASH_RULES.defaultMinutes),
     /** Drones and the Titan join the fight. */
     bots: z.boolean().default(false),
+    /** Where the match is fought. */
+    scenery: z.enum(CLASH_SCENERY_IDS).default("warzone"),
   })
   .strict();
 export type ClashSessionConfig = z.input<typeof clashSessionConfigSchema>;
@@ -503,6 +631,8 @@ export interface ClashView {
   teamCount: number;
   /** Whether drones and the Titan are in the fight. */
   bots: boolean;
+  /** Where the match is fought. Missing from servers that predate sceneries: the war zone. */
+  scenery?: ClashScenery;
   target: number;
   durationSec: number;
   endsAt: number;

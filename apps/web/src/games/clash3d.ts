@@ -1,5 +1,6 @@
 /**
- * Core Clash in 3D: a dusty war zone at sunset, seen from just behind your soldier.
+ * Core Clash in 3D, seen from just behind your soldier: a dusty war zone at sunset, a pine forest
+ * or a factory floor, as the host picks.
  *
  * The fight itself (movement, shots, scoring) stays flat and two-dimensional; this only draws
  * it. A ground point (x, y) sits at (x, height, y) here, so the world's y axis points up.
@@ -12,11 +13,12 @@ import {
   CLASH_FLAG,
   CLASH_RULES as R,
   CLASH_TEAMS,
-  CLASH_WALLS,
   clashBases,
+  clashWalls,
   coverAlong,
   mulberry32,
   type ClashPickupKind,
+  type ClashScenery,
   type Cover,
 } from "@spotflow-games/shared";
 
@@ -73,8 +75,43 @@ export interface ClashWorld {
 }
 
 const { width: W, height: H } = R.arena;
-const SKY_TOP = "#4a5f86";
-const HORIZON = "#e8b98a";
+
+/** The sky, fog and light of each scenery. */
+interface SceneryLook {
+  skyTop: string;
+  horizon: string;
+  fog: [near: number, far: number];
+  /** Sky and ground colours of the ambient light, and its strength. */
+  ambient: [sky: string, ground: string, intensity: number];
+  sun: [color: string, intensity: number];
+  rim: [color: string, intensity: number];
+}
+const LOOKS: Record<ClashScenery, SceneryLook> = {
+  warzone: {
+    skyTop: "#4a5f86",
+    horizon: "#e8b98a",
+    fog: [1100, 4200],
+    ambient: ["#ffe6c8", "#6b5a40", 1.6],
+    sun: ["#ffd7a8", 2.1],
+    rim: ["#a8c8ff", 1.1],
+  },
+  forest: {
+    skyTop: "#4f86c0",
+    horizon: "#cfe2d2",
+    fog: [800, 3400],
+    ambient: ["#eaf6dc", "#3e4f2c", 1.5],
+    sun: ["#fff0cc", 2.3],
+    rim: ["#d6ecff", 0.8],
+  },
+  factory: {
+    skyTop: "#434958",
+    horizon: "#cdb79c",
+    fog: [1000, 3800],
+    ambient: ["#dfe3ea", "#4c4740", 1.55],
+    sun: ["#ffe6c4", 1.9],
+    rim: ["#b8d0ff", 1.0],
+  },
+};
 /** Shots fly level at chest height. */
 export const CLASH_SHOT_HEIGHT = 38;
 /** Third-person camera: how far behind and above the soldier, and how far right of them. */
@@ -313,6 +350,119 @@ function crateTexture() {
     c.lineTo(60, 60);
     c.stroke();
     speckle(c, 64, 64, 200, 0.2, 2);
+  });
+}
+
+/** Forest floor: grass with patches of moss, needles and bare earth. */
+function grassTexture() {
+  return canvasTexture(256, 256, (c) => {
+    c.fillStyle = "#5c7a3a";
+    c.fillRect(0, 0, 256, 256);
+    const rnd = mulberry32(13);
+    for (let i = 0; i < 40; i++) {
+      const pick = rnd();
+      c.fillStyle = pick < 0.35 ? "rgba(40,60,25,0.22)" : pick < 0.7 ? "rgba(150,180,90,0.16)" : "rgba(110,80,45,0.18)";
+      c.beginPath();
+      c.ellipse(rnd() * 256, rnd() * 256, 10 + rnd() * 36, 6 + rnd() * 22, rnd() * 3, 0, Math.PI * 2);
+      c.fill();
+    }
+    // Blades and fallen needles.
+    for (let i = 0; i < 1400; i++) {
+      c.strokeStyle = rnd() < 0.7 ? `rgba(30,55,20,${0.3 * rnd()})` : `rgba(190,215,120,${0.35 * rnd()})`;
+      c.lineWidth = 1;
+      const x = rnd() * 256;
+      const y = rnd() * 256;
+      const a = rnd() * Math.PI * 2;
+      c.beginPath();
+      c.moveTo(x, y);
+      c.lineTo(x + Math.cos(a) * 4, y + Math.sin(a) * 4);
+      c.stroke();
+    }
+    speckle(c, 256, 256, 1200, 0.2, 19);
+  });
+}
+
+/** Factory floor: concrete slabs with joints, oil stains and wear. */
+function floorTexture() {
+  return canvasTexture(256, 256, (c) => {
+    c.fillStyle = "#8f8d87";
+    c.fillRect(0, 0, 256, 256);
+    speckle(c, 256, 256, 3000, 0.2, 23);
+    const rnd = mulberry32(31);
+    for (let i = 0; i < 9; i++) {
+      c.fillStyle = `rgba(30,28,25,${0.08 + rnd() * 0.12})`;
+      c.beginPath();
+      c.ellipse(rnd() * 256, rnd() * 256, 8 + rnd() * 26, 5 + rnd() * 16, rnd() * 3, 0, Math.PI * 2);
+      c.fill();
+    }
+    c.strokeStyle = "rgba(0,0,0,0.25)";
+    c.lineWidth = 2;
+    for (let x = 0; x <= 256; x += 128) {
+      c.beginPath();
+      c.moveTo(x, 0);
+      c.lineTo(x, 256);
+      c.moveTo(0, x);
+      c.lineTo(256, x);
+      c.stroke();
+    }
+  });
+}
+
+/** Stacked logs, for cabin walls and the forest's palisade. */
+function logTexture() {
+  return canvasTexture(64, 64, (c) => {
+    for (let y = 0; y < 64; y += 16) {
+      const g = c.createLinearGradient(0, y, 0, y + 16);
+      g.addColorStop(0, "#5a3d24");
+      g.addColorStop(0.35, "#8a6340");
+      g.addColorStop(0.8, "#6e4c2e");
+      g.addColorStop(1, "#3a2615");
+      c.fillStyle = g;
+      c.fillRect(0, y, 64, 16);
+    }
+    speckle(c, 64, 64, 260, 0.2, 29);
+  });
+}
+
+/** Rows of shingles, for cabin roofs. */
+function shingleTexture() {
+  return canvasTexture(64, 64, (c) => {
+    c.fillStyle = "#4a3326";
+    c.fillRect(0, 0, 64, 64);
+    c.strokeStyle = "rgba(0,0,0,0.35)";
+    c.lineWidth = 2;
+    for (let y = 0; y < 64; y += 10) {
+      c.beginPath();
+      c.moveTo(0, y);
+      c.lineTo(64, y);
+      c.stroke();
+      for (let x = (y / 10) % 2 ? 0 : 8; x < 64; x += 16) {
+        c.beginPath();
+        c.moveTo(x, y);
+        c.lineTo(x, y + 10);
+        c.stroke();
+      }
+    }
+    speckle(c, 64, 64, 200, 0.2, 37);
+  });
+}
+
+/** Yellow and black warning stripes, round the feet of machines. */
+function hazardTexture() {
+  return canvasTexture(64, 64, (c) => {
+    c.fillStyle = "#e3b02a";
+    c.fillRect(0, 0, 64, 64);
+    c.fillStyle = "#1d1d1f";
+    for (let x = -64; x < 64; x += 32) {
+      c.beginPath();
+      c.moveTo(x, 64);
+      c.lineTo(x + 16, 64);
+      c.lineTo(x + 80, 0);
+      c.lineTo(x + 64, 0);
+      c.closePath();
+      c.fill();
+    }
+    speckle(c, 64, 64, 200, 0.25, 41);
   });
 }
 
@@ -600,6 +750,227 @@ function titanModel() {
   ]);
 }
 
+// Scenery props. Each is built along its own x axis (the long side of its block), centred on the
+// origin with its foot at height 0; `place` turns and moves it onto the block.
+
+/** A triangular prism: a triangle `span` wide and `rise` tall, `length` long along z. */
+function prism(span: number, rise: number, length: number) {
+  const shape = new THREE.Shape();
+  shape.moveTo(-span / 2, 0);
+  shape.lineTo(span / 2, 0);
+  shape.lineTo(0, rise);
+  shape.closePath();
+  return new THREE.ExtrudeGeometry(shape, { depth: length, bevelEnabled: false }).translate(0, 0, -length / 2);
+}
+
+/** Moves parts built along x onto a cover block, turning them when the block is long in y. */
+function place(c: Cover, parts: Part[]): Part[] {
+  const turned = c.h > c.w;
+  const cx = c.x + c.w / 2;
+  const cz = c.y + c.h / 2;
+  return parts.map(([geo, color, [x, y, z], rot, scale]) => {
+    if (turned) geo.rotateY(Math.PI / 2);
+    return [geo, color, turned ? [cx + z, y, cz - x] : [cx + x, y, cz + z], rot, scale];
+  });
+}
+
+/** Rotation and scale of parts must be applied before turning, so `place` takes them baked in. */
+function part(
+  geo: THREE.BufferGeometry,
+  color: string,
+  pos: [number, number, number],
+  rot?: [number, number, number],
+  scale?: [number, number, number],
+): Part {
+  const m = new THREE.Matrix4().compose(
+    new THREE.Vector3(),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...(rot ?? [0, 0, 0]))),
+    new THREE.Vector3(...(scale ?? [1, 1, 1])),
+  );
+  return [geo.applyMatrix4(m), color, pos];
+}
+
+const PINE_GREENS = ["#2d5a33", "#356b3b", "#294f2d", "#3d6e37"];
+
+/** A pine, about `size` times the usual: trunk, then three tiers of needles. */
+function pine(x: number, z: number, size: number, rnd: () => number, trunk = 20): Part[] {
+  const green = PINE_GREENS[Math.floor(rnd() * PINE_GREENS.length)]!;
+  const dark = PINE_GREENS[Math.floor(rnd() * PINE_GREENS.length)]!;
+  const spin = rnd() * Math.PI;
+  const s = size;
+  return [
+    [new THREE.CylinderGeometry(trunk * 0.55, trunk * 0.75, 140 * s, 8), "#5a3f2b", [x, 70 * s, z]],
+    [new THREE.ConeGeometry(64 * s, 110 * s, 9), dark, [x, (95 + 55) * s, z], [0, spin, 0]],
+    [new THREE.ConeGeometry(50 * s, 95 * s, 9), green, [x, (150 + 47) * s, z], [0, spin + 0.3, 0]],
+    [new THREE.ConeGeometry(34 * s, 80 * s, 9), green, [x, (205 + 40) * s, z], [0, spin + 0.6, 0]],
+  ];
+}
+
+/** A boulder that fills its block, with a smaller stone or two at its feet. */
+function boulder(c: Cover, rnd: () => number): Part[] {
+  const greys = ["#8b8d86", "#7a7c75", "#9a9a92", "#6f7468"];
+  const grey = () => greys[Math.floor(rnd() * greys.length)]!;
+  const cx = c.x + c.w / 2;
+  const cz = c.y + c.h / 2;
+  const parts: Part[] = [
+    [
+      new THREE.IcosahedronGeometry(1, 0),
+      grey(),
+      [cx, c.height * 0.42, cz],
+      [0, rnd() * 3, 0],
+      [c.w * 0.62, c.height * 0.62, c.h * 0.62],
+    ],
+    [
+      new THREE.DodecahedronGeometry(1, 0),
+      "#5f7046",
+      [cx, c.height * 0.72, cz],
+      [rnd(), rnd() * 3, 0],
+      [Math.min(c.w, c.h) * 0.35, c.height * 0.25, Math.min(c.w, c.h) * 0.35],
+    ],
+  ];
+  for (let i = 0; i < 2; i++) {
+    const r = 8 + rnd() * 8;
+    parts.push([
+      new THREE.DodecahedronGeometry(r, 0),
+      grey(),
+      [c.x + (i ? c.w + 4 : -4), r * 0.5, c.y + rnd() * c.h],
+      [rnd(), rnd() * 3, 0],
+    ]);
+  }
+  return parts;
+}
+
+/** A fallen trunk lying along its block. */
+function fallenLog(c: Cover): Part[] {
+  const len = Math.max(c.w, c.h);
+  const r = Math.min(c.w, c.h) / 2;
+  const along = (geo: THREE.BufferGeometry) => geo.rotateZ(Math.PI / 2);
+  return place(c, [
+    [along(new THREE.CylinderGeometry(r, r * 1.05, len - 6, 10)), "#6b4a2e", [0, r, 0]],
+    [along(new THREE.CylinderGeometry(r * 0.85, r * 0.85, 3, 10)), "#c9a374", [len / 2 - 2, r, 0]],
+    [along(new THREE.CylinderGeometry(r * 0.85, r * 0.85, 3, 10)), "#c9a374", [-len / 2 + 2, r, 0]],
+    part(new THREE.CylinderGeometry(3, 4, 22, 6), "#5a3f2b", [len * 0.2, r * 1.6, 0], [0.6, 0, 0.4]),
+    part(new THREE.CylinderGeometry(9, 9, 10, 8), "#4f6d3a", [-len * 0.25, r * 1.8, 0], [0, 0, 0], [1, 0.5, 1]),
+  ]);
+}
+
+/** The roof, chimney, door and lit windows of a log cabin (its walls are textured separately). */
+function cabinTrim(c: Cover, wallH: number): Part[] {
+  const len = Math.max(c.w, c.h);
+  const dep = Math.min(c.w, c.h);
+  const rise = c.height - wallH;
+  const parts: Part[] = [
+    [prism(dep + 24, rise, len + 20).rotateY(Math.PI / 2), "#5b3b27", [0, wallH, 0]],
+    [box(24, rise + 40, 24), "#8a8780", [len * 0.28, wallH + rise / 2 + 10, dep * 0.12]],
+    [box(28, 6, 28), "#5f5c56", [len * 0.28, wallH + rise + 30, dep * 0.12]],
+  ];
+  for (const side of [1, -1]) {
+    parts.push([box(36, 50, 4), "#3d2817", [0, 25, side * (dep / 2 + 1)]]);
+    for (const at of [-0.3, 0.3])
+      parts.push([box(28, 22, 3), "#f6cf7a", [len * at, wallH * 0.6, side * (dep / 2 + 1)]]);
+  }
+  return place(c, parts);
+}
+
+/** A factory hall's sawtooth roof with its north lights, big doors and a vent stack. */
+function hallTrim(c: Cover, wallH: number): Part[] {
+  const len = Math.max(c.w, c.h);
+  const dep = Math.min(c.w, c.h);
+  const teeth = Math.max(2, Math.round(len / 60));
+  const tooth = len / teeth;
+  const rise = c.height - wallH;
+  const parts: Part[] = [];
+  for (let i = 0; i < teeth; i++) {
+    const x0 = -len / 2 + i * tooth;
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.lineTo(tooth, 0);
+    shape.lineTo(0, rise);
+    shape.closePath();
+    parts.push([
+      new THREE.ExtrudeGeometry(shape, { depth: dep, bevelEnabled: false }).translate(0, 0, -dep / 2),
+      "#6d737a",
+      [x0, wallH, 0],
+    ]);
+    parts.push([box(2, rise * 0.8, dep - 8), "#9cc4dc", [x0 - 0.5, wallH + rise * 0.42, 0]]);
+  }
+  for (const side of [1, -1]) {
+    parts.push([box(len * 0.34, wallH * 0.7, 4), "#59616b", [0, wallH * 0.35, side * (dep / 2 + 1)]]);
+    parts.push([box(len * 0.34 + 10, 6, 5), "#e0b13a", [0, wallH * 0.7 + 3, side * (dep / 2 + 1)]]);
+    parts.push([box(5, wallH * 0.7, 5), "#e0b13a", [-len * 0.17 - 5, wallH * 0.35, side * (dep / 2 + 1)]]);
+    parts.push([box(5, wallH * 0.7, 5), "#e0b13a", [len * 0.17 + 5, wallH * 0.35, side * (dep / 2 + 1)]]);
+  }
+  parts.push([new THREE.CylinderGeometry(8, 8, rise + 60, 10), "#8d949c", [len * 0.35, wallH + (rise + 60) / 2, 0]]);
+  return place(c, parts);
+}
+
+/** A silo standing on its block's plinth, with bands and a ladder. */
+function silo(c: Cover): Part[] {
+  const cx = c.x + c.w / 2;
+  const cz = c.y + c.h / 2;
+  const r = Math.min(c.w, c.h) * 0.47;
+  const body = c.height - 14 - r * 0.5;
+  const parts: Part[] = [
+    [new THREE.CylinderGeometry(r, r, body, 20), "#c9ced5", [cx, 14 + body / 2, cz]],
+    [
+      new THREE.SphereGeometry(r, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+      "#b5bbc3",
+      [cx, 14 + body, cz],
+      [0, 0, 0],
+      [1, 0.5, 1],
+    ],
+  ];
+  for (const k of [0.25, 0.6, 0.92])
+    parts.push([new THREE.CylinderGeometry(r + 1.5, r + 1.5, 5, 20), "#8b939c", [cx, 14 + body * k, cz]]);
+  for (const dz of [-6, 6]) parts.push([box(2, body, 2), "#3c4248", [cx - r - 3, 14 + body / 2, cz + dz]]);
+  for (let y = 24; y < body; y += 14) parts.push([box(2, 2, 14), "#3c4248", [cx - r - 3, 14 + y, cz]]);
+  return parts;
+}
+
+/** A machine on a striped base: a press with a yellow head, a motor and a lit control panel. */
+function machine(c: Cover, base: number): Part[] {
+  const len = Math.max(c.w, c.h);
+  const dep = Math.min(c.w, c.h);
+  const h = c.height - base;
+  return place(c, [
+    [box(len * 0.82, h * 0.55, dep * 0.75), "#58626d", [0, base + h * 0.275, 0]],
+    [box(len * 0.5, h * 0.35, dep * 0.6), "#e2a92a", [-len * 0.1, base + h * 0.55 + h * 0.175, 0]],
+    [box(len * 0.12, h * 0.25, dep * 0.4), "#3a3f45", [-len * 0.1, base + h * 0.9, 0]],
+    [
+      new THREE.CylinderGeometry(dep * 0.2, dep * 0.2, len * 0.3, 12).rotateZ(Math.PI / 2),
+      "#3f6f9a",
+      [len * 0.28, base + h * 0.7, 0],
+    ],
+    [box(4, 22, 18), "#2b2f34", [len * 0.41 + 2, base + h * 0.35, 0]],
+    [box(2, 4, 4), "#ff4d3a", [len * 0.41 + 5, base + h * 0.42, -4]],
+    [box(2, 4, 4), "#4dff8a", [len * 0.41 + 5, base + h * 0.42, 4]],
+  ]);
+}
+
+/** A pipeline along its block on stands, with flanges and a smaller pipe beside it. */
+function pipeline(c: Cover): Part[] {
+  const len = Math.max(c.w, c.h);
+  const dep = Math.min(c.w, c.h);
+  const r = dep * 0.38;
+  const y = c.height - r - 2;
+  const along = (geo: THREE.BufferGeometry) => geo.rotateZ(Math.PI / 2);
+  const parts: Part[] = [
+    [along(new THREE.CylinderGeometry(r, r, len, 12)), "#b0603a", [0, y, -dep * 0.08]],
+    [along(new THREE.CylinderGeometry(4, 4, len, 8)), "#8a929b", [0, 12, dep * 0.3]],
+  ];
+  const stands = Math.max(2, Math.round(len / 55));
+  for (let i = 0; i < stands; i++) {
+    const x = -len / 2 + (len / stands) * (i + 0.5);
+    parts.push([box(6, y, dep - 4), "#474d54", [x, y / 2, 0]]);
+    parts.push([
+      along(new THREE.CylinderGeometry(r + 3, r + 3, 4, 12)),
+      "#7e4a30",
+      [x + len / stands / 2 - 2, y, -dep * 0.08],
+    ]);
+  }
+  return place(c, parts);
+}
+
 const PICKUP_COLOR: Record<ClashPickupKind, string> = { medkit: "#3fd08b", overdrive: "#ff7a2e", haste: "#5ad8ff" };
 
 /** A first-aid case: white, with a red cross on every side. */
@@ -692,7 +1063,8 @@ if (vSurf.w > 0.0) {
 // ---------------------------------------------------------------------------------------------
 // The world
 
-export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
+export function createClashWorld(canvas: HTMLCanvasElement, scenery: ClashScenery = "warzone"): ClashWorld {
+  const sky = LOOKS[scenery] ?? LOOKS.warzone;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -714,20 +1086,20 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
       256,
       (c) => {
         const g = c.createLinearGradient(0, 0, 0, 256);
-        g.addColorStop(0, SKY_TOP);
-        g.addColorStop(0.6, HORIZON);
-        g.addColorStop(1, HORIZON);
+        g.addColorStop(0, sky.skyTop);
+        g.addColorStop(0.6, sky.horizon);
+        g.addColorStop(1, sky.horizon);
         c.fillStyle = g;
         c.fillRect(0, 0, 4, 256);
       },
       false,
     ),
   );
-  scene.fog = new THREE.Fog(HORIZON, 1100, 4200);
+  scene.fog = new THREE.Fog(sky.horizon, ...sky.fog);
 
   const camera = new THREE.PerspectiveCamera(62, 16 / 9, 4, 20000);
-  scene.add(new THREE.HemisphereLight("#ffe6c8", "#6b5a40", 1.6));
-  const sun = new THREE.DirectionalLight("#ffd7a8", 2.1);
+  scene.add(new THREE.HemisphereLight(...sky.ambient));
+  const sun = new THREE.DirectionalLight(...sky.sun);
   const SUN_DIR = new THREE.Vector3(-0.7, 0.8, -0.35).normalize();
   sun.position.copy(SUN_DIR);
   sun.castShadow = true;
@@ -737,7 +1109,7 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
   // A cool light from behind the soldiers, against the sunset, to pick out their edges.
-  const rimLight = new THREE.DirectionalLight("#a8c8ff", 1.1);
+  const rimLight = new THREE.DirectionalLight(...sky.rim);
   rimLight.position.set(0.6, 0.45, 0.65);
   scene.add(rimLight);
   // Soldiers' metal and paint reflect a soft studio room.
@@ -763,21 +1135,30 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     return mesh;
   };
 
-  // Ground: the war zone, a wider wasteland beyond it, and the open plaza in the middle.
-  const dirt = tex(dirtTexture());
+  // Ground: the arena, wider land beyond it, and the open plaza in the middle.
+  const groundTex = scenery === "forest" ? grassTexture : scenery === "factory" ? floorTexture : dirtTexture;
+  const dirt = tex(groundTex());
   dirt.repeat.set(W / 220, H / 220);
   add(
     new THREE.PlaneGeometry(W, H).rotateX(-Math.PI / 2).translate(W / 2, 0, H / 2),
-    own(new THREE.MeshStandardMaterial({ map: dirt, roughness: 1 })),
+    own(new THREE.MeshStandardMaterial({ map: dirt, roughness: scenery === "factory" ? 0.85 : 1 })),
   );
-  const waste = tex(dirtTexture());
+  const waste = tex(scenery === "factory" ? dirtTexture() : groundTex());
   waste.repeat.set(60, 60);
   add(
     new THREE.PlaneGeometry(16000, 16000).rotateX(-Math.PI / 2).translate(W / 2, -1, H / 2),
-    own(new THREE.MeshStandardMaterial({ map: waste, color: "#c9b08a", roughness: 1 })),
+    own(
+      new THREE.MeshStandardMaterial({
+        map: waste,
+        color: scenery === "forest" ? "#9fb08e" : scenery === "factory" ? "#7a7672" : "#c9b08a",
+        roughness: 1,
+      }),
+    ),
   );
   const plazaR = R.titan.leash + R.titan.radius;
-  const plazaTex = tex(concreteTexture("#a39a8a", 4));
+  const plazaTex = tex(
+    concreteTexture(scenery === "forest" ? "#8e8f80" : scenery === "factory" ? "#a3a29c" : "#a39a8a", 4),
+  );
   plazaTex.repeat.set(6, 6);
   add(
     new THREE.CircleGeometry(plazaR, 48).rotateX(-Math.PI / 2).translate(CLASH_CENTER.x, 0, CLASH_CENTER.y),
@@ -800,6 +1181,18 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
   const sandbags: Part[] = [];
   const sandRnd = mulberry32(17);
   let containerN = 0;
+  // Forest and factory props, baked into one mesh each: matte, and painted metal.
+  const props: Part[] = [];
+  const metalProps: Part[] = [];
+  const propRnd = mulberry32(23);
+  const logs =
+    scenery === "forest" ? own(new THREE.MeshStandardMaterial({ map: tex(logTexture()), roughness: 0.9 })) : null;
+  const sheet =
+    scenery === "factory"
+      ? own(new THREE.MeshStandardMaterial({ map: corrugated, color: "#b9c4ce", roughness: 0.55, metalness: 0.35 }))
+      : null;
+  const hazard =
+    scenery === "factory" ? own(new THREE.MeshStandardMaterial({ map: tex(hazardTexture()), roughness: 0.8 })) : null;
   const coverMesh = (c: Cover) => {
     const at = (g: THREE.BufferGeometry) => g.translate(c.x + c.w / 2, c.height / 2, c.y + c.h / 2);
     switch (c.kind) {
@@ -850,12 +1243,47 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
             }
         return;
       }
+      case "tree":
+        props.push(...pine(c.x + c.w / 2, c.y + c.h / 2, 0.95 + propRnd() * 0.2, propRnd, c.w / 2));
+        return;
+      case "rock":
+        props.push(...boulder(c, propRnd));
+        return;
+      case "log":
+        props.push(...fallenLog(c));
+        return;
+      case "cabin": {
+        const wallH = Math.round(c.height * 0.6);
+        add(tiledBox(c.w, wallH, c.h, 64).translate(c.x + c.w / 2, wallH / 2, c.y + c.h / 2), logs ?? wood);
+        props.push(...cabinTrim(c, wallH));
+        return;
+      }
+      case "hall": {
+        const wallH = Math.round(c.height * 0.72);
+        add(tiledBox(c.w, wallH, c.h, 48).translate(c.x + c.w / 2, wallH / 2, c.y + c.h / 2), sheet ?? concrete);
+        metalProps.push(...hallTrim(c, wallH));
+        return;
+      }
+      case "tank":
+        add(tiledBox(c.w, 14, c.h, 64).translate(c.x + c.w / 2, 7, c.y + c.h / 2), concrete);
+        metalProps.push(...silo(c));
+        return;
+      case "machine": {
+        const base = 12;
+        add(tiledBox(c.w, base, c.h, 32).translate(c.x + c.w / 2, base / 2, c.y + c.h / 2), hazard ?? concrete);
+        metalProps.push(...machine(c, base));
+        return;
+      }
+      case "pipe":
+        metalProps.push(...pipeline(c));
+        return;
     }
   };
-  for (const c of CLASH_WALLS) coverMesh(c);
+  const walls = clashWalls(scenery);
+  for (const c of walls) coverMesh(c);
   if (sandbags.length) add(bake(sandbags), colored);
 
-  // The perimeter, and ruined blocks beyond it on the skyline.
+  // The perimeter, and the skyline beyond it.
   const rim = 40;
   for (const [x, y, w, h] of [
     [-rim, -rim, W + rim * 2, rim],
@@ -863,10 +1291,62 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     [-rim, 0, rim, H],
     [W, 0, rim, H],
   ] as const)
-    add(tiledBox(w, 70, h, 64).translate(x + w / 2, 35, y + h / 2), concrete);
+    add(tiledBox(w, 70, h, 64).translate(x + w / 2, 35, y + h / 2), logs ?? concrete);
   const skyRnd = mulberry32(42);
   const skyline: Part[] = [];
-  for (let i = 0; i < 90; i++) {
+  if (scenery === "forest") {
+    // A wall of pines all round, and wooded hills further off.
+    for (let i = 0; i < 260; i++) {
+      const side = i % 4;
+      const along = skyRnd();
+      const out = 70 + skyRnd() * skyRnd() * 900;
+      const x = side < 2 ? -300 + along * (W + 600) : side === 2 ? -out : W + out;
+      const z = side >= 2 ? -300 + along * (H + 600) : side === 0 ? -out : H + out;
+      skyline.push(...pine(x, z, 1.1 + skyRnd() * 0.9, skyRnd, 26));
+    }
+    for (let i = 0; i < 26; i++) {
+      const ang = (i / 26) * Math.PI * 2;
+      const dist = 2200 + skyRnd() * 900;
+      const r = 700 + skyRnd() * 600;
+      skyline.push([
+        sphere(1, 14, 8),
+        ["#4b6a41", "#3f5c39", "#56744a"][i % 3]!,
+        [W / 2 + Math.cos(ang) * (W / 2 + dist), -r * 0.15, H / 2 + Math.sin(ang) * (H / 2 + dist)],
+        [0, 0, 0],
+        [r, r * (0.35 + skyRnd() * 0.25), r],
+      ]);
+    }
+  }
+  if (scenery === "factory") {
+    // Warehouses, tanks and smoking chimneys round the yard.
+    for (let i = 0; i < 70; i++) {
+      const ang = (i / 70) * Math.PI * 2 + skyRnd() * 0.05;
+      const dist = 900 + skyRnd() * 1500;
+      const px = W / 2 + Math.cos(ang) * (W / 2 + dist * 0.6);
+      const pz = H / 2 + Math.sin(ang) * (H / 2 + dist * 0.6);
+      if (i % 5 === 0) {
+        const h = 420 + skyRnd() * 380;
+        skyline.push([new THREE.CylinderGeometry(22, 34, h, 12), "#8a6f62", [px, h / 2, pz]]);
+        skyline.push([new THREE.CylinderGeometry(23, 25, 40, 12), "#c9402e", [px, h - 50, pz]]);
+        skyline.push([new THREE.CylinderGeometry(24, 26, 40, 12), "#e8e4dc", [px, h - 10, pz]]);
+        for (let k = 0; k < 3; k++)
+          skyline.push([sphere(40 + k * 22, 10, 8), "#b9b4ad", [px + k * 50, h + 40 + k * 55, pz + k * 18]]);
+      } else if (i % 5 === 1) {
+        const r = 60 + skyRnd() * 50;
+        skyline.push([new THREE.CylinderGeometry(r, r, r * 1.6, 16), "#b9bec5", [px, r * 0.8, pz]]);
+      } else {
+        const w = 200 + skyRnd() * 260;
+        const h = 90 + skyRnd() * 160;
+        skyline.push([
+          box(w, h, w * (0.5 + skyRnd() * 0.4)),
+          ["#6f7782", "#7d7468", "#5f6670", "#8a8f96"][i % 4]!,
+          [px, h / 2, pz],
+          [0, ang + Math.PI / 2, 0],
+        ]);
+      }
+    }
+  }
+  for (let i = 0; i < (scenery === "warzone" ? 90 : 0); i++) {
     const ang = (i / 90) * Math.PI * 2 + skyRnd() * 0.05;
     const dist = 1500 + skyRnd() * 1400;
     const w = 120 + skyRnd() * 220;
@@ -880,6 +1360,20 @@ export function createClashWorld(canvas: HTMLCanvasElement): ClashWorld {
     ]);
   }
   add(bake(skyline), colored);
+  if (props.length) add(bake(props), colored);
+  if (metalProps.length)
+    add(
+      bake(metalProps),
+      own(
+        new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.5,
+          metalness: 0.45,
+          envMap: studio,
+          envMapIntensity: 0.5,
+        }),
+      ),
+    );
 
   // Bases: a painted pad and a flag for each team.
   const bases = clashBases();
