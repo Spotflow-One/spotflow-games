@@ -7,7 +7,7 @@ import { z } from "zod";
  */
 export const AVATAR_OPTIONS = {
   skin: [1, 2, 3, 4, 5],
-  hairStyle: ["none", "short", "curly", "long", "bun", "afro", "mohawk"],
+  hairStyle: ["none", "short", "curly", "long", "bun", "afro", "locs", "mohawk"],
   hairColor: [1, 2, 3, 4, 5, 6],
   eyes: ["round", "happy", "wink", "sleepy"],
   mouth: ["smile", "grin", "neutral", "open"],

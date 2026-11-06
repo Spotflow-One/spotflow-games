@@ -54,6 +54,22 @@ export function Face({ avatar }: { avatar: AvatarConfig }) {
   );
 }
 
+/** Locs hanging down each side of the head: centre x, top y, length. */
+const LOCS_BACK: Array<[number, number, number]> = [
+  [16, 24, 22],
+  [20.6, 27, 20],
+  [43.4, 27, 20],
+  [48, 24, 22],
+];
+/** Loc ends over the forehead: centre x, length. */
+const LOCS_FRONT: Array<[number, number]> = [
+  [23.5, 10],
+  [28, 8.5],
+  [32.5, 9.5],
+  [37, 8],
+  [41, 10],
+];
+
 function HairBack({ style, cls }: { style: AvatarConfig["hairStyle"]; cls: string }) {
   switch (style) {
     case "curly":
@@ -77,6 +93,23 @@ function HairBack({ style, cls }: { style: AvatarConfig["hairStyle"]; cls: strin
       return <circle className={cls} cx="32" cy="12" r="6" />;
     case "afro":
       return <circle className={cls} cx="32" cy="27" r="19" />;
+    case "locs":
+      // A crown of hair with separate rope-like locs falling past the ears to the shoulders.
+      return (
+        <g className={cls}>
+          <ellipse cx="32" cy="25" rx="15" ry="13.5" />
+          {LOCS_BACK.map(([x, y, h]) => (
+            <rect key={x} x={x - 2.3} y={y} width="4.6" height={h} rx="2.3" />
+          ))}
+          <g stroke="rgba(0,0,0,0.22)" strokeWidth="0.9" strokeLinecap="round">
+            {LOCS_BACK.flatMap(([x, y, h]) =>
+              [8, 13, 18]
+                .filter((d) => d < h - 2)
+                .map((d) => <path key={`${x}-${d}`} d={`M${x - 1.6} ${y + d}h3.2`} />),
+            )}
+          </g>
+        </g>
+      );
     default:
       return null;
   }
@@ -91,6 +124,16 @@ function HairFront({ style, cls }: { style: AvatarConfig["hairStyle"]; cls: stri
       return <path className={cls} d="M20 31c0-9 5-14 12-14s12 5 12 14c-3-4-7-6-12-6s-9 2-12 6z" />;
     case "mohawk":
       return <path className={cls} d="M29 22c0-6 1.5-11 3-14 1.5 3 3 8 3 14z" />;
+    case "locs":
+      // Hairline with the ends of a few locs falling over the forehead.
+      return (
+        <g className={cls}>
+          <path d="M20 30c0-9 5-14 12-14s12 5 12 14c-3-3.5-7-5.5-12-5.5s-9 2-12 5.5z" />
+          {LOCS_FRONT.map(([x, h]) => (
+            <rect key={x} x={x - 2} y="18" width="4" height={h} rx="2" />
+          ))}
+        </g>
+      );
     default:
       return null;
   }
