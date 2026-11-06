@@ -240,7 +240,7 @@ function Round({
   const author = session.participants.find((p) => p.userId === game.authorId);
   const isAuthor = game.authorId === meId;
   const reveal = game.reveal;
-  const canVote = game.phase === "voting" && game.isPlayer && !isAuthor && game.myVote === null;
+  const canVote = game.phase === "voting" && game.isPlayer && !isAuthor;
   const statements = game.statements ?? [];
   const nameOf = (id: string) => session.participants.find((p) => p.userId === id);
 
@@ -397,7 +397,7 @@ function Round({
         {game.phase === "voting"
           ? `${game.votedCount} of ${game.voterCount} have voted`
           : `${game.votedCount} of ${game.voterCount} voted`}
-        {game.phase === "voting" && game.myVote !== null && " · Vote locked in"}
+        {game.phase === "voting" && game.myVote !== null && " · You can change your vote until time runs out"}
         {game.phase === "voting" && !game.isPlayer && " · You're watching"}
       </span>
     </>
