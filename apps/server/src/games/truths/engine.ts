@@ -164,12 +164,13 @@ export function createTruthsEngine(timing: { revealMs: number } = { revealMs: TR
           if (state.phase !== "voting") throw new GameError("Voting isn't open");
           if (userId === round(state)!.authorId) throw new GameError("You can't vote on your own statements");
           if (!ctx.players().includes(userId)) throw new GameError("Only players can vote");
-          if (state.votes.has(userId)) throw new GameError("You already voted");
           if (!Number.isInteger(action.index) || action.index < 0 || action.index > 2)
             throw new GameError("Pick one of the statements");
+          // Players can change their pick until the timer runs out (or the host closes voting),
+          // so voting stays open even once everyone has picked. The tie-break counts the final pick.
+          if (state.votes.get(userId)?.index === action.index) return;
           state.votes.set(userId, { index: action.index, ms: ctx.now() - state.phaseStartedAt });
-          if (voters(ctx, state).every((id) => state.votes.has(id))) closeVoting(ctx, state);
-          else ctx.broadcastState();
+          ctx.broadcastState();
           return;
         }
         case "next": {
@@ -207,7 +208,7 @@ export function createTruthsEngine(timing: { revealMs: number } = { revealMs: TR
       }
       if (state.phase !== "voting") return;
       if (userId === round(state)?.authorId) beginRound(ctx, state, state.roundIndex + 1);
-      else if (voters(ctx, state).every((id) => state.votes.has(id))) closeVoting(ctx, state);
+      else if (voters(ctx, state).length === 0) closeVoting(ctx, state);
     },
 
     viewFor(state, viewer): TruthsView {

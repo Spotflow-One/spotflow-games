@@ -96,11 +96,18 @@ describe("Two Truths and a Lie", () => {
     );
 
     vi.advanceTimersByTime(2000);
+    // Players can change their pick while the timer runs.
+    room.handleAction(right, { type: "vote", index: (lie + 1) % 3 });
+    expect(view(room, right).myVote).toBe((lie + 1) % 3);
     room.handleAction(right, { type: "vote", index: lie });
-    expect(() => room.handleAction(right, { type: "vote", index: lie })).toThrow("You already voted");
+    expect(view(room, right).myVote).toBe(lie);
     expect(view(room, wrong)).toMatchObject({ myVote: null, votedCount: 1, voterCount: 2, reveal: null });
 
+    room.handleAction(wrong, { type: "vote", index: lie });
     room.handleAction(wrong, { type: "vote", index: (lie + 1) % 3 });
+    // Everyone has picked, but voting stays open until the timer ends.
+    expect(view(room, wrong)).toMatchObject({ phase: "voting", votedCount: 2, myVote: (lie + 1) % 3 });
+    vi.advanceTimersByTime(28_000);
     const r = view(room, wrong);
     expect(r.phase).toBe("reveal");
     expect(r.reveal!.lieIndex).toBe(lie);
@@ -178,7 +185,7 @@ describe("Two Truths and a Lie", () => {
     expect(room.status).toBe("results");
   });
 
-  it("skips a removed author's round and closes voting when the last voter is removed", async () => {
+  it("skips a removed author's round and keeps voting open until the timer", async () => {
     const { room } = makeRoom({ featuredCount: 3 });
     await room.start("host");
     submitAll(room);
@@ -196,6 +203,8 @@ describe("Two Truths and a Lie", () => {
     if (current.phase === "voting") {
       const others = PLAYERS.filter((id) => id !== author && id !== current.authorId);
       room.handleAction(others[0]!, { type: "vote", index: 0 });
+      expect(view(room, "host").phase).toBe("voting");
+      vi.advanceTimersByTime(30_000);
       expect(view(room, "host").phase).toBe("reveal");
     }
   });
