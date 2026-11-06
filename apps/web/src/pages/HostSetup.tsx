@@ -8,8 +8,10 @@ import {
   QUIZ_RULES,
   TRUTHS_RULES,
   CLASH_RULES,
+  CLASH_SCENERIES,
   CLASH_TEAMS,
   RACE_RULES,
+  type ClashScenery,
   type GameType,
   type WordListSummary,
   type QuizSummary,
@@ -48,6 +50,7 @@ export function HostSetup() {
   const [voteSec, setVoteSec] = useState<number>(TRUTHS_RULES.defaultVoteSec);
   const [writeSec, setWriteSec] = useState<number>(TRUTHS_RULES.defaultWriteSec);
   const [bots, setBots] = useState(false);
+  const [scenery, setScenery] = useState<ClashScenery>("warzone");
   const [target, setTarget] = useState<number>(CLASH_RULES.defaultTarget);
   const [minutes, setMinutes] = useState<number>(CLASH_RULES.defaultMinutes);
   const [laps, setLaps] = useState<number>(RACE_RULES.defaultLaps);
@@ -91,7 +94,7 @@ export function HostSetup() {
         : gameType === "draw"
           ? { wordListId, turnSec, rounds }
           : gameType === "clash"
-            ? { target, minutes, bots }
+            ? { target, minutes, bots, scenery }
             : gameType === "race"
               ? { laps }
               : { featuredCount, voteSec, writeSec };
@@ -273,11 +276,29 @@ export function HostSetup() {
             How it plays
           </h2>
           <p className="sg-muted" style={{ margin: 0 }}>
-            Players are split into two teams, {CLASH_TEAMS.map((t) => t.name).join(" and ")}, at either end of a war
-            zone of buildings, containers, crates and sandbags. You see it from just behind your soldier. Move as a
-            team, use cover, and tag the other side (+{CLASH_RULES.eliminationPower} each). Teammates spot enemies on
-            each other's minimaps. Best on a laptop with a mouse; phones play sideways with a stick and a fire button.
+            Players are split into two teams, {CLASH_TEAMS.map((t) => t.name).join(" and ")}, at either end of the
+            arena. You see it from just behind your soldier. Move as a team, use cover, and tag the other side (+
+            {CLASH_RULES.eliminationPower} each). Teammates spot enemies on each other's minimaps. Best on a laptop with
+            a mouse; phones play sideways with a stick and a fire button.
           </p>
+          <div className="sg-field">
+            <label id="clash-scenery">Scenery</label>
+            <div className="quiz-picker" role="radiogroup" aria-labelledby="clash-scenery">
+              {CLASH_SCENERIES.map((sc) => (
+                <button
+                  type="button"
+                  key={sc.id}
+                  role="radio"
+                  aria-checked={scenery === sc.id}
+                  className="quiz-option"
+                  onClick={() => setScenery(sc.id)}
+                >
+                  <b>{sc.name}</b>
+                  <span className="sg-muted">{sc.blurb}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="sg-field">
             <label id="power-target">Tags to win</label>
             <div className="sg-seg" role="radiogroup" aria-labelledby="power-target">
@@ -304,7 +325,7 @@ export function HostSetup() {
           <div className="sg-field">
             <Switch checked={bots} onChange={setBots} label="Add bots" />
             <span className="sg-muted" style={{ fontSize: 14 }}>
-              Drones roam the war zone (+{CLASH_RULES.drone.power} each) and a Titan wakes in the plaza after{" "}
+              Drones roam the arena (+{CLASH_RULES.drone.power} each) and a Titan wakes in the plaza after{" "}
               {CLASH_RULES.titan.firstSpawnMs / 1000} seconds (+{CLASH_RULES.titan.power} to the team that hits it
               hardest).
             </span>
